@@ -1,0 +1,11 @@
+# .NET build output; the exe is attached to GitHub Releases instead
+bin/
+obj/
+dist/
+.vs/
+*.user
+
+# Python
+__pycache__/
+
+.DS_Store

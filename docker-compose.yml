@@ -1,0 +1,17 @@
+services:
+  nas-search:
+    image: python:3.15-slim
+    command: python -u /app/nas_search.py
+    environment:
+      NAS_NAME: DS920        # your NAS's network name, as in \\DS920\video
+      SCAN_MINUTES: 30       # full rescan interval
+      # AUTH: "me:change-this"   # uncomment to require a login
+    volumes:
+      - ./nas_search.py:/app/nas_search.py:ro
+      # One line per shared folder to search. Keep the share name after /data/ so the \\NAS\share paths are right.
+      # Everyone who can open the page sees these file names, so only list shares that is fine for.
+      - /volume1/video:/data/video:ro
+      - /volume1/photo:/data/photo:ro
+    ports:
+      - "8765:8765"
+    restart: unless-stopped
