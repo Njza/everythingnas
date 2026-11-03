@@ -13,7 +13,7 @@ import threading
 import time
 from array import array
 from bisect import bisect_right
-from collections import namedtuple
+from collections import Counter, namedtuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import accumulate, compress, count, filterfalse, repeat
 from operator import add, and_, contains, not_, or_
@@ -257,25 +257,46 @@ def search(q):
     return {'total': len(hits), 'indexed': len(ix.names), 'scanned': ix.scanned, 'results': out}
 
 
+EXT_OK = re.compile(r'[^\s|<>";]+')  # usable inside an ext:a;b term
+_exts = (None, [])  # (index, its counts): one count per scan, not per request
+
+
+def exts():
+    """Every file extension in the index, most files first, as {ext, count}, lowercase like ext: matches."""
+    global _exts
+    ix = INDEX
+    if _exts[0] is not ix:
+        n = Counter(low.rpartition('.')[2] for low, d in zip(ix.lows, ix.isdir) if not d and '.' in low)
+        _exts = (ix, [{'ext': e, 'count': c} for e, c in n.most_common() if EXT_OK.fullmatch(e)])
+    return {'exts': _exts[1]}
+
+
 def scan_forever():
     global INDEX
     while True:
         t = time.time()
         INDEX = build()
+        exts()  # count the formats now, so the first format list after a scan does not wait for it
         print(f'indexed {len(INDEX[0])} entries in {time.time() - t:.1f}s', flush=True)
         time.sleep(SCAN_MINUTES * 60)
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'  # keep-alive: a search reuses the connection instead of opening one per keystroke
+
     def do_GET(self):
         if AUTH and not hmac.compare_digest(self.headers.get('Authorization', ''), AUTH):
             self.send_response(401)
             self.send_header('WWW-Authenticate', 'Basic realm="nas-search"')
+            self.send_header('Content-Length', '0')  # HTTP/1.1: without it the client waits for a body
             self.end_headers()
             return
         u = urlsplit(self.path)
         if u.path == '/search':
             body = json.dumps(search(parse_qs(u.query).get('q', [''])[0])).encode()
+            ctype = 'application/json'
+        elif u.path == '/exts':
+            body = json.dumps(exts()).encode()
             ctype = 'application/json'
         else:
             body, ctype = PAGE, 'text/html; charset=utf-8'

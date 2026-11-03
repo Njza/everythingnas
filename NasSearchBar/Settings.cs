@@ -13,8 +13,11 @@ public sealed record Settings
     public string Address { get; init; } = "";  // host:port on the LAN, e.g. 192.168.1.10:8765
     public string User { get; init; } = "";
     public string ProtectedPassword { get; init; } = "";  // DPAPI-encrypted by the app, never plain text on disk
-    public bool UseDriveLetters { get; init; }
     public string Hotkey { get; init; } = "Ctrl+Alt+Space";  // WPF KeyGesture text
+    public string Exts { get; init; } = "";  // "pdf;docx": search only these formats, as in ext:pdf;docx; "" = all
+
+    // The query sent to the server: the formats ticked in the bar's filter narrow every search
+    public string Filtered(string q) => Exts == "" ? q : $"{q} ext:{Exts}";
 
     // shortcut: plain http, LAN only; add https and a second address if this ever has to work away from home
     [JsonIgnore]

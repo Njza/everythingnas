@@ -11,11 +11,18 @@
     <!-- lets the SDK build this on macOS/Linux too -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
+    <!-- uses the installed .NET Desktop Runtime: a 0.3 MB exe instead of 72 MB with the runtime bundled.
+         A PC without it gets Windows' prompt with the download link on first start. -->
+    <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- also runs on a newer major (.NET 11...) when 10 is not installed -->
+    <RollForward>Major</RollForward>
     <AssemblyName>NasSearch</AssemblyName>
+    <!-- bump on every release build; shows in the settings window and the exe's file properties -->
+    <Version>1.0.9</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- symbols inside the exe: crash traces keep file and line, and dist holds just the one file -->
+    <DebugType>embedded</DebugType>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- WFO0003 wants WinForms' SetHighDpiMode; this is a WPF app, where the manifest is the way to set DPI awareness -->

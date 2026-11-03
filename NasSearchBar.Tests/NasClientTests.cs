@@ -58,6 +58,35 @@ public class NasClientTests
     }
 
     [Fact]
+    public async Task Reads_the_indexed_formats()
+    {
+        using var nas = new FakeServer(body: """{"exts": [{"ext": "pdf", "count": 12}, {"ext": "docx", "count": 3}]}""");
+        var r = await new NasClient(nas.Url, "", "").ExtsAsync(CancellationToken.None);
+        Assert.Equal([new ExtCount("pdf", 12), new ExtCount("docx", 3)], r.Exts);
+    }
+
+    [Fact]
+    public async Task Localhost_reaches_an_ipv4_only_server_without_the_ipv6_delay()
+    {
+        var l = new TcpListener(IPAddress.Loopback, 0);  // IPv4 only, like nas_search.py
+        l.Start();
+        var port = ((IPEndPoint)l.LocalEndpoint).Port;
+        _ = Task.Run(async () =>
+        {
+            using var c = await l.AcceptTcpClientAsync();
+            var s = c.GetStream();
+            await s.ReadAsync(new byte[4096]);
+            var body = Encoding.UTF8.GetBytes("""{"exts": []}""");
+            await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\n\r\n"));
+            await s.WriteAsync(body);
+        });
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await new NasClient(new Uri($"http://localhost:{port}/"), "", "").ExtsAsync(CancellationToken.None);
+        l.Stop();
+        Assert.True(sw.ElapsedMilliseconds < 1000, $"took {sw.ElapsedMilliseconds} ms");  // ::1 first took ~2 s on Windows
+    }
+
+    [Fact]
     public async Task Sends_basic_auth()
     {
         using var nas = new FakeServer();

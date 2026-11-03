@@ -23,16 +23,16 @@ public partial class SettingsWindow : Window
         AddressInput.Text = s.Address;
         UserInput.Text = s.User;
         PassInput.Password = Secret.Unprotect(s.ProtectedPassword);
-        UseDrives.IsChecked = s.UseDriveLetters;
+        AutoStartBox.IsChecked = AutoStart.Enabled;
+        VersionText.Text = $"版本 {typeof(App).Assembly.GetName().Version?.ToString(3)}";
         Loaded += (_, _) => AddressInput.Focus();
     }
 
-    Settings Read() => new()
+    Settings Read() => Result with  // keeps what this window does not edit, like the format filter
     {
         Address = AddressInput.Text.Trim(),
         User = UserInput.Text.Trim(),
         ProtectedPassword = Secret.Protect(PassInput.Password),
-        UseDriveLetters = UseDrives.IsChecked == true,
         Hotkey = HotkeyInput.Text,
     };
 
@@ -61,8 +61,9 @@ public partial class SettingsWindow : Window
         try
         {
             s.Save(Settings.FilePath);
+            AutoStart.Enabled = AutoStartBox.IsChecked == true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             Status.Text = "保存失败：" + ex.Message;
             return;

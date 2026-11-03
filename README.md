@@ -36,28 +36,36 @@ Click a row to copy its `\\NAS\share\...` path; paste it into Win+R or Explorer 
 A WPF app that pops up a search bar over the desktop and opens results in their default app (Word, Excel, ...),
 straight from the NAS share. It talks to the server above through `/search`.
 
-1. Copy `dist/NasSearch.exe` anywhere and run it. The first run opens the settings window.
+1. Install the .NET 10 Desktop Runtime once per PC; without it the exe offers the download when it starts.
+   If no prompt shows up, run this in a terminal:
+
+   ```
+   winget install Microsoft.DotNet.DesktopRuntime.10
+   ```
+
+   Then copy `dist/NasSearch.exe` (0.3 MB) anywhere and run it. The first run opens the settings window.
 2. Settings (tray icon → right-click → 设置), saved in `%APPDATA%\NasSearch\settings.json`:
    - 地址: the NAS's LAN `host:port`, e.g. `192.168.1.10:8765` (plain http; LAN only by design).
-     测试连接 checks it.
+     测试连接 checks it. Files open by the same host, `\\192.168.1.10\share\folder\file`, whatever
+     `NAS_NAME` the server uses.
    - 账号 / 密码: only when the server sets `AUTH`. The password is encrypted with Windows DPAPI
      (readable only by the same Windows user on the same PC).
-   - 用映射的网络驱动器打开: open `Z:\folder\file` instead of `\\NAS\share\folder\file` when that share
-     is mapped to a drive letter (matched by share name).
+   - 开机自动启动: shows the bar on the desktop at Windows login (the current user's `Run` registry key).
    - 快捷键: click the box and press the new combination (needs Ctrl, Alt or Win). It takes effect on save;
      if another app already owns it, the old one stays and the window says so. If the saved one is taken
      at startup, the app asks for another one; the tray icon still opens the bar.
-3. The hotkey (default `Ctrl+Alt+Space`) shows or hides the bar. `Enter` opens the selected file, `Ctrl+Enter` opens its folder,
-   `Esc` closes. Clicking a row opens it too. Tray menu: 设置, 退出.
+3. The bar stays on the desktop like a widget (not on top of other windows). The hotkey (default `Ctrl+Alt+Space`)
+   brings it to the front with the search box focused, or hides it when it is already in front. `Enter` opens the selected file, `Ctrl+Enter` opens its folder,
+   `Esc` clears the search. Clicking a row opens it too; right-clicking opens its folder. Tray menu: 设置, 退出.
+   The funnel button lists every format the server has indexed (from `/exts`); tick some and every search
+   only returns those (it adds `ext:a;b` to the query). The ticks are saved in settings.json.
 4. Pin a result with the pin button on its row or `Ctrl+D` (again to unpin). With the search box empty the bar
    lists the pins, newest first; pinned files also come first among search results.
    Saved in `%APPDATA%\NasSearch\pins.json`.
-5. To start it with Windows, put a shortcut to the exe in `shell:startup`.
 
-Windows must already be able to open `\\NAS\share` (open it once in Explorer and save the password),
-and `NAS_NAME` on the server must resolve from this PC; use the NAS IP there if it does not.
+Windows must already be able to open `\\<地址 host>\share` (open it once in Explorer and save the password).
 
-Build (no Windows needed; output in `dist/`, a ~75 MB self-contained exe):
+Build (no Windows needed; output in `dist/`, a 0.3 MB exe that runs on the installed .NET Desktop Runtime):
 
 ```bash
 docker run --rm -v "$PWD":/w -v nas-search-nuget:/root/.nuget/packages -w /w/NasSearchBar \

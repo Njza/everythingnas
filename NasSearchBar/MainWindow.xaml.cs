@@ -4,7 +4,6 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -49,14 +48,12 @@ public partial class MainWindow : Window
     [DllImport("dwmapi.dll")]
     static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
-    [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
-    static extern int WNetGetConnection(string localName, StringBuilder remoteName, ref int length);
-
     public MainWindow()
     {
         InitializeComponent();
         debounce.Tick += async (_, _) => await Search();
-        Deactivated += (_, _) => Hide();
+        // Alt+F4 only hides: a closed window could never come back on the hotkey. App shutdown ignores the cancel.
+        Closing += (_, e) => { e.Cancel = true; Hide(); };
         LoadSettings();
         hwnd = new WindowInteropHelper(this).EnsureHandle();  // the hotkey needs a window handle before the first show
         HwndSource.FromHwnd(hwnd).AddHook(WndProc);
@@ -85,6 +82,108 @@ public partial class MainWindow : Window
         client = settings.Server is { } server
             ? new NasClient(server, settings.User, Secret.Unprotect(settings.ProtectedPassword))
             : null;
+        ShowFilter();
+    }
+
+    // One row of the format filter; the CheckBox writes On back through its binding
+    public sealed class ExtChoice(string ext, int count, bool on)
+    {
+        public string Ext => ext;
+        public int Count => count;
+        public bool On { get; set; } = on;
+    }
+
+    void ShowFilter()
+    {
+        FilterButton.Tag = settings.Exts == "" ? null : "on";
+        FilterButton.ToolTip = settings.Exts == "" ? "只显示勾选的格式" : "只显示：" + settings.Exts.Replace(";", "、");
+    }
+
+    const int Rare = 3;  // formats with fewer files than this fold under "其他": mostly odd names like a.1.2.3
+    List<ExtChoice> choices = [];  // every format, server order (most files first); the list shows a part
+    bool showRare;
+
+    HashSet<string> Ticked() => choices.Where(c => c.On).Select(c => c.Ext).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    // Ticked first, then the common ones; the rare ones when unfolded; typing searches all of them.
+    // A fresh ItemsSource also redraws the ticks after FilterAll_Click (ExtChoice has no change events).
+    void ShowChoices()
+    {
+        var q = FilterSearch.Text.Trim();
+        var rare = choices.Count(c => !c.On && c.Count < Rare);
+        FilterList.ItemsSource = (q != ""
+                ? choices.Where(c => c.Ext.Contains(q, StringComparison.OrdinalIgnoreCase))
+                : choices.Where(c => c.On || c.Count >= Rare || showRare))
+            .OrderBy(c => !c.On)  // stable: keeps most files first in each group
+            .ToList();
+        RareButton.Content = showRare ? "收起少见格式" : $"其他 {rare} 种少见格式（少于 {Rare} 个文件）";
+        RareButton.Visibility = q == "" && rare > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FilterHint.Visibility = q == "" ? Visibility.Visible : Visibility.Hidden;
+    }
+
+    void FilterSearch_TextChanged(object sender, TextChangedEventArgs e) => ShowChoices();
+
+    void Rare_Click(object sender, RoutedEventArgs e)
+    {
+        showRare = !showRare;
+        ShowChoices();
+    }
+
+    // Lists the saved formats at once, then every format the server has indexed
+    async void Filter_Click(object sender, RoutedEventArgs e)
+    {
+        choices = settings.Exts.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(x => new ExtChoice(x, 0, true)).ToList();
+        showRare = false;
+        FilterSearch.Text = "";
+        ShowChoices();  // TextChanged does not fire when the box was already empty
+        FilterStatus.Text = "正在读取格式…";
+        FilterPopup.IsOpen = true;
+        FilterSearch.Focus();
+        if (client is null)
+        {
+            FilterStatus.Text = "先在设置里填 NAS 地址";
+            return;
+        }
+        try
+        {
+            var all = (await client.ExtsAsync(CancellationToken.None)).Exts;
+            if (!FilterPopup.IsOpen) return;  // closed while loading; closing already saved the ticks
+            var on = Ticked();  // includes any ticked while loading
+            var known = all.Select(x => x.Ext).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            choices = on.Where(x => !known.Contains(x)).Select(x => new ExtChoice(x, 0, true))  // saved, gone from the NAS
+                .Concat(all.Select(x => new ExtChoice(x.Ext, x.Count, on.Contains(x.Ext))))
+                .ToList();
+            ShowChoices();
+            FilterStatus.Text = $"{all.Length:N0} 种格式，不勾 = 全部";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            FilterStatus.Text = "连不上后端，读不到格式";
+        }
+    }
+
+    void FilterAll_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var c in choices) c.On = false;
+        ShowChoices();
+    }
+
+    // Saves the ticks when the list closes and searches again with them
+    async void FilterPopup_Closed(object? sender, EventArgs e)
+    {
+        var exts = string.Join(';', choices.Where(c => c.On).Select(c => c.Ext));
+        if (exts == settings.Exts) return;
+        settings = settings with { Exts = exts };
+        ShowFilter();
+        try
+        {
+            settings.Save(Settings.FilePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetStatus("格式没保存：" + ex.Message, error: true);
+        }
+        await Search();
     }
 
     public void OpenSettings()
@@ -130,7 +229,7 @@ public partial class MainWindow : Window
     {
         if (msg == WM_HOTKEY && wParam == HotkeyId)
         {
-            if (IsVisible) Hide(); else ShowBar();
+            if (IsActive) Hide(); else ShowBar();  // in front: hide; hidden or behind another app: bring it up
             handled = true;
         }
         return IntPtr.Zero;
@@ -139,10 +238,13 @@ public partial class MainWindow : Window
     public void ShowBar()
     {
         Render();
-        Opacity = 0;  // hidden while it moves to the right screen
-        Show();
-        PlaceOnCursorScreen();
-        Opacity = 1;
+        if (!IsVisible)  // it lives on the desktop: placed once, then left where it is
+        {
+            Opacity = 0;  // hidden while it moves to the right screen
+            Show();
+            PlaceOnCursorScreen();
+            Opacity = 1;
+        }
         Activate();
         Query.Focus();
         Query.SelectAll();
@@ -186,9 +288,10 @@ public partial class MainWindow : Window
             SetStatus("先在设置里填 NAS 地址", error: true);
             return;
         }
+        SetStatus("搜索中…");  // an unreachable server takes up to the 5 s timeout to fail
         try
         {
-            var data = await client.SearchAsync(q, cts.Token);
+            var data = await client.SearchAsync(settings.Filtered(q), cts.Token);
             if (cts.IsCancellationRequested) return;  // a newer query already ran
             found = data.Results;
             Render();
@@ -199,7 +302,7 @@ public partial class MainWindow : Window
         {
             found = [];
             Render();
-            SetStatus(e is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } ? "账号或密码不对" : "连不上 NAS", error: true);
+            SetStatus(e is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } ? "账号或密码不对" : $"连不上 {settings.Address}，后端开了吗", error: true);
         }
     }
 
@@ -208,9 +311,8 @@ public partial class MainWindow : Window
     void Render(Hit? keep = null)
     {
         var pinsView = Query.Text.Trim() == "";
-        var drives = DriveMap();
         var hits = (pinsView ? pins.Items : pins.PinnedFirst(found))
-            .Select(h => h with { Pinned = pins.Contains(h), Drive = h.DriveIn(drives) })
+            .Select(h => h with { Pinned = pins.Contains(h), Host = settings.Server?.Host })
             .ToArray();
         var old = Results.SelectedIndex;
         Results.Tag = pinsView ? "pins" : null;
@@ -257,11 +359,20 @@ public partial class MainWindow : Window
 
     async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (FilterPopup.IsOpen)  // typing in the format search: keep Enter and the arrows away from the results
+        {
+            if (e.Key == Key.Escape)
+            {
+                FilterPopup.IsOpen = false;
+                e.Handled = true;
+            }
+            return;
+        }
         var n = Results.Items.Count;
         switch (e.Key)
         {
             case Key.Escape:
-                Hide();
+                Query.Clear();  // back to the pins; the bar stays on the desktop
                 break;
             case Key.Down when n > 0:
                 Select((Results.SelectedIndex + 1) % n);
@@ -291,38 +402,28 @@ public partial class MainWindow : Window
             Open(h, Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
     }
 
+    // Right-click a row: open its folder, like Ctrl+Enter (left-click opens the file)
+    void Results_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ItemsControl.ContainerFromElement(Results, (DependencyObject)e.OriginalSource) is not ListBoxItem { DataContext: Hit h })
+            return;
+        Select(Results.Items.IndexOf(h));
+        Open(h, folder: true);
+        e.Handled = true;
+    }
+
     void Open(Hit h, bool folder)
     {
-        var path = h.OpenPath(DriveMap());  // the same path the row shows
+        var path = h.OpenPath;  // the same path the row shows
         try
         {
             if (folder) Launch("explorer.exe", $"/select,\"{path}\"");
             else Launch(path);  // default app: Word, Excel, Photos...
-            Hide();
         }
         catch (Win32Exception e)
         {
             SetStatus(e.Message, error: true);
         }
-    }
-
-    Dictionary<string, string> DriveMap() => settings.UseDriveLetters ? MappedShares() : [];
-
-    // share name -> "Z:" for every mapped network drive, read fresh so new mappings count at once.
-    // shortcut: matches by share name only (\\DS920\docs and \\192.168.1.10\docs are the same); fine for one NAS.
-    static Dictionary<string, string> MappedShares()
-    {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var d in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Network))
-        {
-            var drive = d.Name.TrimEnd('\\');
-            var remote = new StringBuilder(260);
-            var length = remote.Capacity;
-            if (WNetGetConnection(drive, remote, ref length) != 0) continue;
-            var parts = remote.ToString().TrimStart('\\').TrimEnd('\\').Split('\\');
-            if (parts.Length == 2) map.TryAdd(parts[1], drive);  // drives mapped to a subfolder are skipped
-        }
-        return map;
     }
 
     static void Launch(string file, string? args = null) =>

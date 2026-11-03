@@ -84,6 +84,12 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(self.names('regex:dog('), [])  # half-typed pattern, no crash
         self.assertEqual(self.names('path:movies'), ['Alien.MKV', 'Movies'])
 
+    def test_exts_counts_files_most_first(self):
+        e = ns.exts()['exts']
+        self.assertEqual({x['ext']: x['count'] for x in e}, {'jpg': 2, 'txt': 2, 'mkv': 1, 'docx': 1, 'xlsx': 1})
+        self.assertEqual([x['count'] for x in e], sorted((x['count'] for x in e), reverse=True))
+        self.assertIs(ns.exts()['exts'], e)  # counted once per scan
+
     def test_path_terms(self):
         self.assertEqual(self.names('movies\\ali'), ['Alien.MKV'])
         self.assertEqual(self.names('\\alien'), ['alien-notes.txt', 'Alien.MKV'])

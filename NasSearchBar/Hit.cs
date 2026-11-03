@@ -9,6 +9,10 @@ public record SearchResponse(int Total, int Indexed, Hit[] Results)
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 }
 
+// nas_search.py's /exts: every file extension in the index, most files first
+public record ExtsResponse(ExtCount[] Exts);
+public record ExtCount(string Ext, int Count);
+
 // Path is the UNC folder, e.g. \\DS920\docs\合同; Size is null for folders.
 public record Hit(string Name, string Path, long? Size, double Mtime)
 {
@@ -18,53 +22,36 @@ public record Hit(string Name, string Path, long? Size, double Mtime)
     [JsonIgnore]
     public bool Pinned { get; init; }
 
-    // Set by the window from DriveIn for display; never stored or sent
+    // Set by the window from the settings address, e.g. 192.168.1.10, so paths open by the NAS's LAN
+    // address instead of NAS_NAME; display only, never stored or sent (pins stay keyed by the server's path)
     [JsonIgnore]
-    public string? Drive { get; init; }
+    public string? Host { get; init; }
 
     public string FullPath => Path + "\\" + Name;
     public string Share => Parts.Length > 1 ? Parts[1] : "";
     public string Folder => Parts.Length > 2 ? Parts[2] : Parts.Length == 1 ? Path : "";
 
-    // "Z:" when this share is mapped to a drive letter, or "C:" for this PC's own C$ admin share; else null
-    public string? DriveIn(IReadOnlyDictionary<string, string> driveByShare) =>
-        driveByShare.TryGetValue(Share, out var drive) ? drive
-        : Share is [var c, '$'] && char.IsAsciiLetter(c) && IsThisPc(Parts[0]) ? char.ToUpperInvariant(c) + ":"
-        : null;
+    // "C:" for this PC's own C$ admin share; else null
+    public string? Drive =>
+        Share is [var c, '$'] && char.IsAsciiLetter(c) && IsThisPc(Parts[0]) ? char.ToUpperInvariant(c) + ":" : null;
 
     static bool IsThisPc(string host) =>
         host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1"
         || host.Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase);
 
-    // Z:\folder\name when the share has a drive letter, else the UNC path
-    public string OpenPath(IReadOnlyDictionary<string, string> driveByShare) => In(DriveIn(driveByShare), Name);
+    // \\192.168.1.10\share\folder\name, or C:\folder\name for this PC's own drive
+    public string OpenPath => In(Name);
 
-    // The folder as you would type it, C:\Users\... or \\NAS\share\..., split so the row can trim the
+    // The folder as you would type it, C:\Users\... or \\192.168.1.10\share\..., split so the row can trim the
     // outer part and always show the folder holding the file
-    public string Location => In(Drive, "");
+    public string Location => In("");
     public string LocationOuter => Location.LastIndexOf('\\') is var i and >= 2 ? Location[..(i + 1)] : "";
     public string LocationInner => Location[LocationOuter.Length..];
 
-    string In(string? drive, string name) => drive is null
-        ? string.Join('\\', new[] { Path, name }.Where(s => s != ""))
-        : string.Join('\\', new[] { drive, Folder, name }.Where(s => s != ""));
+    // the server's path with its \\NAS_NAME swapped for \\Host
+    string Unc => Host is null ? Path : @"\\" + Host + Path[(2 + Parts[0].Length)..];
 
-    public string Kind => Size is null ? "文件夹" : System.IO.Path.GetExtension(Name).TrimStart('.').ToLowerInvariant() switch
-    {
-        "" => "文件",
-        var e when e.Length > 5 => e[..5],  // the tag is 40px wide
-        var e => e,
-    };
-
-    // The app that opens it; the tag color follows this
-    public string App => Kind switch
-    {
-        "doc" or "docx" or "rtf" or "odt" => "word",
-        "xls" or "xlsx" or "xlsm" or "csv" or "ods" => "excel",
-        "ppt" or "pptx" or "odp" => "powerpoint",
-        "pdf" => "pdf",
-        _ => "",
-    };
+    string In(string name) => string.Join('\\', (Drive is { } d ? new[] { d, Folder, name } : [Unc, name]).Where(s => s != ""));
 
     public string SizeText => Size switch
     {

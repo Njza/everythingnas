@@ -5,7 +5,7 @@
         xmlns:local="clr-namespace:NasSearchBar"
         Title="NAS 搜索" Width="680" SizeToContent="Height"
         Background="{StaticResource Surface}"
-        ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
+        ResizeMode="NoResize" ShowInTaskbar="False"
         FontFamily="Segoe UI, Microsoft YaHei UI" FontSize="14"
         TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
         PreviewKeyDown="Window_PreviewKeyDown">
@@ -110,6 +110,8 @@
             </Style.Triggers>
         </Style>
 
+        <local:ShellIconConverter x:Key="ShellIcon" />
+
         <DataTemplate x:Key="RowTemplate">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -119,52 +121,10 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!-- the file itself: a sheet with a folded corner, tinted by the app that opens it; folders are manila -->
-                <Grid x:Name="Doc" Width="28" Height="34" HorizontalAlignment="Left" VerticalAlignment="Center">
-                    <Grid.Style>
-                        <Style TargetType="Grid">
-                            <Setter Property="Tag" Value="{StaticResource FileTint}" />
-                            <Setter Property="TextElement.Foreground" Value="{StaticResource FileInk}" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding App}" Value="word">
-                                    <Setter Property="Tag" Value="{StaticResource WordTint}" />
-                                    <Setter Property="TextElement.Foreground" Value="{StaticResource WordInk}" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding App}" Value="excel">
-                                    <Setter Property="Tag" Value="{StaticResource ExcelTint}" />
-                                    <Setter Property="TextElement.Foreground" Value="{StaticResource ExcelInk}" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding App}" Value="powerpoint">
-                                    <Setter Property="Tag" Value="{StaticResource PowerPointTint}" />
-                                    <Setter Property="TextElement.Foreground" Value="{StaticResource PowerPointInk}" />
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding App}" Value="pdf">
-                                    <Setter Property="Tag" Value="{StaticResource PdfTint}" />
-                                    <Setter Property="TextElement.Foreground" Value="{StaticResource PdfInk}" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Grid.Style>
-                    <Grid x:Name="Sheet">
-                        <Path Fill="{Binding Tag, ElementName=Doc}"
-                              Data="M0.5,3.5 A3,3 0 0 1 3.5,0.5 H19.5 L27.5,8.5 V30.5 A3,3 0 0 1 24.5,33.5 H3.5 A3,3 0 0 1 0.5,30.5 Z" />
-                        <Path Stroke="{Binding (TextElement.Foreground), ElementName=Doc}" StrokeThickness="1"
-                              StrokeLineJoin="Round" Opacity="0.4"
-                              Data="M0.5,3.5 A3,3 0 0 1 3.5,0.5 H19.5 L27.5,8.5 V30.5 A3,3 0 0 1 24.5,33.5 H3.5 A3,3 0 0 1 0.5,30.5 Z" />
-                        <Path Fill="{Binding (TextElement.Foreground), ElementName=Doc}" Opacity="0.2"
-                              Data="M19.5,0.5 V6.5 A2,2 0 0 0 21.5,8.5 H27.5 Z" />
-                        <TextBlock Text="{Binding Kind}" FontSize="11" FontWeight="SemiBold"
-                                   HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4" />
-                    </Grid>
-                    <!-- lucide "folder" -->
-                    <Viewbox x:Name="Folder" Width="28" Height="28" Visibility="Collapsed">
-                        <Canvas Width="24" Height="24">
-                            <Path Fill="{StaticResource FolderTint}" Stroke="{StaticResource FolderInk}" StrokeThickness="1.3"
-                                  StrokeLineJoin="Round"
-                                  Data="M20,20 A2,2 0 0 0 22,18 V8 A2,2 0 0 0 20,6 H12.1 A2,2 0 0 1 10.41,5.1 L9.6,3.9 A2,2 0 0 0 7.93,3 H4 A2,2 0 0 0 2,5 V18 A2,2 0 0 0 4,20 Z" />
-                        </Canvas>
-                    </Viewbox>
-                </Grid>
+                <!-- the icon Explorer shows for this file type -->
+                <Image Width="32" Height="32" HorizontalAlignment="Left" VerticalAlignment="Center"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       Source="{Binding Converter={StaticResource ShellIcon}}" />
 
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Name}" FontSize="14" LineHeight="20" LineStackingStrategy="BlockLineHeight"
@@ -199,12 +159,6 @@
 
                 <Button Grid.Column="3" Style="{StaticResource PinButton}" Click="Pin_Click" />
             </Grid>
-            <DataTemplate.Triggers>
-                <DataTrigger Binding="{Binding Size}" Value="{x:Null}">
-                    <Setter TargetName="Sheet" Property="Visibility" Value="Collapsed" />
-                    <Setter TargetName="Folder" Property="Visibility" Value="Visible" />
-                </DataTrigger>
-            </DataTemplate.Triggers>
         </DataTemplate>
     </Window.Resources>
 
@@ -213,6 +167,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <!-- lucide "search", 18px, stroke 1.5 -->
@@ -232,6 +187,96 @@
                     <TextBlock x:Name="Status" Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
                                MaxWidth="320" TextTrimming="CharacterEllipsis"
                                FontFamily="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Muted}" />
+
+                    <!-- lucide "funnel": pick the formats to search; blue while a filter is on -->
+                    <Button x:Name="FilterButton" Grid.Column="3" Width="28" Height="28" Margin="8,0,-4,0"
+                            Focusable="False" Cursor="Hand" ToolTip="只显示勾选的格式" Click="Filter_Click">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="B" CornerRadius="6" Background="Transparent">
+                                    <Viewbox Width="16" Height="16">
+                                        <Canvas Width="24" Height="24">
+                                            <Path x:Name="Icon" Stroke="{StaticResource Muted}" StrokeThickness="2" Fill="Transparent"
+                                                  StrokeLineJoin="Round" Data="M22,3 H2 L10,12.46 V19 L14,21 V12.46 Z" />
+                                        </Canvas>
+                                    </Viewbox>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="B" Property="Background" Value="#0F171717" />
+                                        <Setter TargetName="Icon" Property="Stroke" Value="{StaticResource Primary}" />
+                                    </Trigger>
+                                    <Trigger Property="Tag" Value="on">
+                                        <Setter TargetName="Icon" Property="Stroke" Value="{StaticResource Accent}" />
+                                        <Setter TargetName="Icon" Property="Fill" Value="{StaticResource Accent}" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <!-- opaque, not AllowsTransparency, so its text keeps ClearType like the bar -->
+                    <Popup x:Name="FilterPopup" PlacementTarget="{Binding ElementName=FilterButton}" Placement="Bottom"
+                           HorizontalOffset="-216" VerticalOffset="10" StaysOpen="False" Closed="FilterPopup_Closed">
+                        <Border Width="244" Padding="12" Background="{StaticResource Surface}"
+                                BorderBrush="{StaticResource InputLine}" BorderThickness="1">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="全部显示" Focusable="False" Cursor="Hand"
+                                            Click="FilterAll_Click">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <TextBlock Text="{TemplateBinding Content}" FontSize="12" Foreground="{StaticResource Accent}" />
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                    <TextBlock Text="只显示勾选的格式" FontSize="12" Foreground="{StaticResource Secondary}" />
+                                </DockPanel>
+                                <Grid Margin="0,8,0,0">
+                                    <TextBlock x:Name="FilterHint" Text="找格式，如 pdf" FontSize="13" Margin="9,0,0,0"
+                                               Foreground="{StaticResource Muted}" VerticalAlignment="Center" IsHitTestVisible="False" />
+                                    <TextBox x:Name="FilterSearch" FontSize="13" Padding="6,5" Background="Transparent"
+                                             BorderBrush="{StaticResource InputLine}" Foreground="{StaticResource Primary}"
+                                             CaretBrush="{StaticResource Accent}" SelectionBrush="{StaticResource Accent}"
+                                             TextChanged="FilterSearch_TextChanged" />
+                                </Grid>
+                                <TextBlock x:Name="FilterStatus" FontSize="12" Margin="0,6,0,8" Foreground="{StaticResource Muted}" />
+                                <ListBox x:Name="FilterList" MaxHeight="320" Background="Transparent" BorderThickness="0"
+                                         Focusable="False" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         VirtualizingPanel.IsVirtualizing="True">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Focusable" Value="False" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListBoxItem">
+                                                        <ContentPresenter Margin="0,0,4,8" />
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Count, StringFormat=N0}" FontSize="12"
+                                                           Foreground="{StaticResource Muted}" Typography.NumeralAlignment="Tabular" />
+                                                <CheckBox IsChecked="{Binding On}" Content="{Binding Ext}" Focusable="False" />
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <Button x:Name="RareButton" Focusable="False" Cursor="Hand" Margin="0,4,0,0"
+                                        HorizontalAlignment="Left" Click="Rare_Click">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <TextBlock Text="{TemplateBinding Content}" FontSize="12" Foreground="{StaticResource Accent}" />
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                    </Popup>
                 </Grid>
 
                 <StackPanel x:Name="ResultsPanel" Visibility="Collapsed">
@@ -241,7 +286,7 @@
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Hidden"
                              ItemContainerStyle="{StaticResource Row}" ItemTemplate="{StaticResource RowTemplate}"
-                             PreviewMouseLeftButtonUp="Results_Click" />
+                             PreviewMouseLeftButtonUp="Results_Click" PreviewMouseRightButtonUp="Results_RightClick" />
                     <Border Height="1" Background="{StaticResource Hairline}" />
                     <StackPanel Orientation="Horizontal" Height="36" Margin="16,0">
                         <Border Style="{StaticResource Keycap}"><TextBlock Text="Enter" Style="{StaticResource KeyText}" /></Border>
@@ -251,7 +296,7 @@
                         <Border Style="{StaticResource Keycap}"><TextBlock Text="Ctrl+D" Style="{StaticResource KeyText}" /></Border>
                         <TextBlock Text="置顶" Style="{StaticResource Hint}" />
                         <Border Style="{StaticResource Keycap}"><TextBlock Text="Esc" Style="{StaticResource KeyText}" /></Border>
-                        <TextBlock Text="关闭" Style="{StaticResource Hint}" />
+                        <TextBlock Text="清空" Style="{StaticResource Hint}" />
                     </StackPanel>
                 </StackPanel>
             </StackPanel>

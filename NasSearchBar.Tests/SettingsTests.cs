@@ -6,7 +6,7 @@ public class SettingsTests
     public void Saves_and_loads()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString(), "settings.json");
-        var s = new Settings { Address = "192.168.1.10:8765", User = "me", ProtectedPassword = "x", UseDriveLetters = true, Hotkey = "Ctrl+Shift+F" };
+        var s = new Settings { Address = "192.168.1.10:8765", User = "me", ProtectedPassword = "x", Hotkey = "Ctrl+Shift+F", Exts = "pdf;docx" };
         s.Save(path);
         Assert.Equal(s, Settings.Load(path));
         Assert.DoesNotContain("Server", File.ReadAllText(path).Replace("Address", ""));
@@ -17,6 +17,13 @@ public class SettingsTests
     {
         Assert.Equal(new Settings(), Settings.Load("/nonexistent/settings.json"));
         Assert.Equal("Ctrl+Alt+Space", new Settings().Hotkey);
+    }
+
+    [Fact]
+    public void Ticked_formats_narrow_the_query()
+    {
+        Assert.Equal("合同", new Settings().Filtered("合同"));
+        Assert.Equal("合同 ext:pdf;docx", new Settings { Exts = "pdf;docx" }.Filtered("合同"));
     }
 
     [Theory]
