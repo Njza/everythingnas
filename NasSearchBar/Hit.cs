@@ -18,15 +18,36 @@ public record Hit(string Name, string Path, long? Size, double Mtime)
     [JsonIgnore]
     public bool Pinned { get; init; }
 
+    // Set by the window from DriveIn for display; never stored or sent
+    [JsonIgnore]
+    public string? Drive { get; init; }
+
     public string FullPath => Path + "\\" + Name;
     public string Share => Parts.Length > 1 ? Parts[1] : "";
     public string Folder => Parts.Length > 2 ? Parts[2] : Parts.Length == 1 ? Path : "";
 
-    // Z:\folder\name when this share is mapped to a drive letter, else the UNC path
-    public string OpenPath(IReadOnlyDictionary<string, string> driveByShare) =>
-        driveByShare.TryGetValue(Share, out var drive)
-            ? string.Join('\\', new[] { drive, Folder, Name }.Where(s => s != ""))
-            : FullPath;
+    // "Z:" when this share is mapped to a drive letter, or "C:" for this PC's own C$ admin share; else null
+    public string? DriveIn(IReadOnlyDictionary<string, string> driveByShare) =>
+        driveByShare.TryGetValue(Share, out var drive) ? drive
+        : Share is [var c, '$'] && char.IsAsciiLetter(c) && IsThisPc(Parts[0]) ? char.ToUpperInvariant(c) + ":"
+        : null;
+
+    static bool IsThisPc(string host) =>
+        host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1"
+        || host.Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase);
+
+    // Z:\folder\name when the share has a drive letter, else the UNC path
+    public string OpenPath(IReadOnlyDictionary<string, string> driveByShare) => In(DriveIn(driveByShare), Name);
+
+    // The folder as you would type it, C:\Users\... or \\NAS\share\..., split so the row can trim the
+    // outer part and always show the folder holding the file
+    public string Location => In(Drive, "");
+    public string LocationOuter => Location.LastIndexOf('\\') is var i and >= 2 ? Location[..(i + 1)] : "";
+    public string LocationInner => Location[LocationOuter.Length..];
+
+    string In(string? drive, string name) => drive is null
+        ? string.Join('\\', new[] { Path, name }.Where(s => s != ""))
+        : string.Join('\\', new[] { drive, Folder, name }.Where(s => s != ""));
 
     public string Kind => Size is null ? "文件夹" : System.IO.Path.GetExtension(Name).TrimStart('.').ToLowerInvariant() switch
     {

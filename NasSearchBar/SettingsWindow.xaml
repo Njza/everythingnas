@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="NAS 搜索设置" Width="480" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen" Background="{StaticResource Surface}"
-        FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" FontSize="14"
-        Foreground="{StaticResource Primary}" TextOptions.TextFormattingMode="Display">
+        FontFamily="Segoe UI, Microsoft YaHei UI" FontSize="14"
+        Foreground="{StaticResource Primary}" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
 
     <Window.Resources>
         <Style x:Key="Heading" TargetType="TextBlock">

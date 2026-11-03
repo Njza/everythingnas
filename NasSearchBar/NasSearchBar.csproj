@@ -16,7 +16,16 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <AssemblyName>NasSearch</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- WFO0003 wants WinForms' SetHighDpiMode; this is a WPF app, where the manifest is the way to set DPI awareness -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- the tray loads the same icon as the exe -->
+    <Resource Include="app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- WinForms global usings clash with WPF names (Application, MessageBox, Color...) -->

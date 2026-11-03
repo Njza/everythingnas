@@ -13,6 +13,20 @@
         <SolidColorBrush x:Key="Secondary" Color="#525252" />
         <SolidColorBrush x:Key="Muted" Color="#737373" />
         <SolidColorBrush x:Key="Accent" Color="#2563EB" />
+        <!-- file sheets: a light tint for the paper, the ink for its outline and extension, by the app that opens it -->
+        <SolidColorBrush x:Key="FileTint" Color="#0A171717" />
+        <SolidColorBrush x:Key="FileInk" Color="#737373" />
+        <SolidColorBrush x:Key="WordTint" Color="#142B579A" />
+        <SolidColorBrush x:Key="WordInk" Color="#2B579A" />
+        <SolidColorBrush x:Key="ExcelTint" Color="#14217346" />
+        <SolidColorBrush x:Key="ExcelInk" Color="#217346" />
+        <SolidColorBrush x:Key="PowerPointTint" Color="#14B7472A" />
+        <SolidColorBrush x:Key="PowerPointInk" Color="#B7472A" />
+        <SolidColorBrush x:Key="PdfTint" Color="#14C42B1C" />
+        <SolidColorBrush x:Key="PdfInk" Color="#C42B1C" />
+        <!-- manila, like a folder in a filing cabinet -->
+        <SolidColorBrush x:Key="FolderTint" Color="#2EE0B04C" />
+        <SolidColorBrush x:Key="FolderInk" Color="#9A6F1E" />
         <FontFamily x:Key="Mono">Cascadia Mono, Consolas, Microsoft YaHei UI</FontFamily>
     </Application.Resources>
 </Application>

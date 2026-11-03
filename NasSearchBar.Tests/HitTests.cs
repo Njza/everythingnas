@@ -10,6 +10,28 @@ public class HitTests
           {"name": "docs", "path": "\\\\DS920", "size": null, "mtime": 1793682642.7}]}
         """;
 
+    [Theory]
+    [InlineData(@"\\N\docs\合同\客户A", null, @"\\N\docs\合同\", "客户A")]
+    [InlineData(@"\\N\docs\合同\客户A", "Z:", @"Z:\合同\", "客户A")]
+    [InlineData(@"\\N\docs", "Z:", "", "Z:")]  // file at the share root
+    [InlineData(@"\\N", null, "", @"\\N")]  // a share at the NAS root
+    public void Location_split(string path, string? drive, string outer, string inner)
+    {
+        var h = new Hit("a.pdf", path, 1, 0) { Drive = drive };
+        Assert.Equal(outer, h.LocationOuter);
+        Assert.Equal(inner, h.LocationInner);
+    }
+
+    [Fact]
+    public void Admin_share_on_this_pc_is_its_drive()
+    {
+        var none = new Dictionary<string, string>();
+        Assert.Equal("C:", new Hit("a", @"\\localhost\c$\Users", 1, 0).DriveIn(none));
+        Assert.Equal(@"C:\Users\a", new Hit("a", @"\\localhost\C$\Users", 1, 0).OpenPath(none));
+        Assert.Null(new Hit("a", @"\\DS920\C$\Users", 1, 0).DriveIn(none));  // another machine's C: is not ours
+        Assert.Null(new Hit("a", @"\\localhost\docs", 1, 0).DriveIn(none));
+    }
+
     [Fact]
     public void Parses_server_response()
     {

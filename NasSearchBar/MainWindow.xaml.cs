@@ -39,6 +39,16 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    const uint SWP_NOSIZE = 0x1, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10;
+
+    [DllImport("user32.dll")]
+    static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2;
+
+    [DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
     [DllImport("mpr.dll", CharSet = CharSet.Unicode)]
     static extern int WNetGetConnection(string localName, StringBuilder remoteName, ref int length);
 
@@ -50,8 +60,10 @@ public partial class MainWindow : Window
         LoadSettings();
         hwnd = new WindowInteropHelper(this).EnsureHandle();  // the hotkey needs a window handle before the first show
         HwndSource.FromHwnd(hwnd).AddHook(WndProc);
+        var round = DWMWCP_ROUND;  // Windows 11 round corners; Windows 10 ignores it (square corners)
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
 
-        tray = new() { Icon = DrawTrayIcon(), Text = "NAS 搜索", Visible = true };
+        tray = new() { Icon = TrayIcon(), Text = "NAS 搜索", Visible = true };
         tray.MouseClick += (_, e) => { if (e.Button == System.Windows.Forms.MouseButtons.Left) ShowBar(); };
         tray.ContextMenuStrip = new();
         tray.ContextMenuStrip.Items.Add("设置", null, (_, _) => OpenSettings());
@@ -126,14 +138,26 @@ public partial class MainWindow : Window
 
     public void ShowBar()
     {
-        var area = SystemParameters.WorkArea;  // shortcut: always the primary screen
-        Left = area.Left + (area.Width - Width) / 2;
-        Top = area.Top + area.Height / 5;
         Render();
+        Opacity = 0;  // hidden while it moves to the right screen
         Show();
+        PlaceOnCursorScreen();
+        Opacity = 1;
         Activate();
         Query.Focus();
         Query.SelectAll();
+    }
+
+    // Centered on the screen under the mouse, in physical pixels: WPF's Left/Top are in DIPs and go wrong
+    // when the screens have different scales.
+    void PlaceOnCursorScreen()
+    {
+        var area = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position).WorkingArea;
+        // first onto that screen, so Windows switches the window to its DPI, then center at the new size
+        SetWindowPos(hwnd, IntPtr.Zero, area.Left, area.Top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        var w = (int)Math.Round(Width * VisualTreeHelper.GetDpi(this).DpiScaleX);
+        SetWindowPos(hwnd, IntPtr.Zero, area.Left + (area.Width - w) / 2, area.Top + area.Height / 5, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     void Query_TextChanged(object sender, TextChangedEventArgs e)
@@ -184,8 +208,9 @@ public partial class MainWindow : Window
     void Render(Hit? keep = null)
     {
         var pinsView = Query.Text.Trim() == "";
+        var drives = DriveMap();
         var hits = (pinsView ? pins.Items : pins.PinnedFirst(found))
-            .Select(h => h with { Pinned = pins.Contains(h) })
+            .Select(h => h with { Pinned = pins.Contains(h), Drive = h.DriveIn(drives) })
             .ToArray();
         var old = Results.SelectedIndex;
         Results.Tag = pinsView ? "pins" : null;
@@ -268,7 +293,7 @@ public partial class MainWindow : Window
 
     void Open(Hit h, bool folder)
     {
-        var path = settings.UseDriveLetters ? h.OpenPath(MappedShares()) : h.FullPath;
+        var path = h.OpenPath(DriveMap());  // the same path the row shows
         try
         {
             if (folder) Launch("explorer.exe", $"/select,\"{path}\"");
@@ -280,6 +305,8 @@ public partial class MainWindow : Window
             SetStatus(e.Message, error: true);
         }
     }
+
+    Dictionary<string, string> DriveMap() => settings.UseDriveLetters ? MappedShares() : [];
 
     // share name -> "Z:" for every mapped network drive, read fresh so new mappings count at once.
     // shortcut: matches by share name only (\\DS920\docs and \\192.168.1.10\docs are the same); fine for one NAS.
@@ -301,19 +328,10 @@ public partial class MainWindow : Window
     static void Launch(string file, string? args = null) =>
         Process.Start(args is null ? new ProcessStartInfo(file) { UseShellExecute = true } : new ProcessStartInfo(file, args))?.Dispose();
 
-    static System.Drawing.Icon DrawTrayIcon()
+    // the size the tray uses at this scale (16 at 100%, 20 at 125%...), picked from app.ico
+    static System.Drawing.Icon TrayIcon()
     {
-        using var bmp = new System.Drawing.Bitmap(32, 32);
-        using (var g = System.Drawing.Graphics.FromImage(bmp))
-        using (var fill = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0x25, 0x63, 0xEB)))
-        using (var pen = new System.Drawing.Pen(System.Drawing.Color.White, 3))
-        {
-            pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            g.FillEllipse(fill, 0, 0, 31, 31);
-            g.DrawEllipse(pen, 8, 8, 12, 12);
-            g.DrawLine(pen, 18.5f, 18.5f, 24, 24);
-        }
-        return System.Drawing.Icon.FromHandle(bmp.GetHicon());
+        using var s = Application.GetResourceStream(new Uri("pack://application:,,,/app.ico")).Stream;
+        return new System.Drawing.Icon(s, System.Windows.Forms.SystemInformation.SmallIconSize);
     }
 }
