@@ -1,0 +1,33 @@
+# Every push to main and every pull request: run both test suites and build the exe.
+# The exe is kept as a downloadable artifact of the run (Actions → the run → Artifacts) for trying a change.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest  # the search bar is a Windows app, and LocalIndex's tests use Windows paths
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+
+      - name: Test the server
+        run: python -m unittest -v test_nas_search
+      - name: Test the search bar
+        run: dotnet test NasSearchBar.Tests
+      - name: Build the exe
+        run: dotnet publish NasSearchBar -c Release -o dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: NasSearch
+          path: dist/NasSearch.exe
+          retention-days: 14

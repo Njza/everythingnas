@@ -68,6 +68,11 @@ public partial class MainWindow : Window
         tray.ContextMenuStrip.Items.Add("设置", null, (_, _) => OpenSettings());
         tray.ContextMenuStrip.Items.Add("退出", null, (_, _) => Application.Current.Shutdown());
         Closed += (_, _) => tray.Dispose();
+
+        Updater.CleanUp();
+        updateCheck.Tick += async (_, _) => await CheckForUpdate();
+        updateCheck.Start();
+        _ = CheckForUpdate();
     }
 
     void LoadSettings()
@@ -253,6 +258,33 @@ public partial class MainWindow : Window
     }
 
     IndexingWindow? indexing;
+
+    readonly DispatcherTimer updateCheck = new() { Interval = TimeSpan.FromHours(12) };
+
+    // Puts a newer GitHub release in place for the next start; offers to restart now from the tray
+    async Task CheckForUpdate()
+    {
+        Version? latest;
+        try
+        {
+            latest = await Updater.UpdateAsync(CancellationToken.None);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException
+                                      or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidDataException)
+        {
+            return;  // offline, GitHub down, a bad download or a read-only folder: try again next time
+        }
+        if (latest is null) return;
+        updateCheck.Stop();  // in place; one update per run is enough
+        var v = latest.ToString(3);
+        tray.ContextMenuStrip!.Items.Insert(0, new System.Windows.Forms.ToolStripMenuItem($"重启以更新到 {v}", null, (_, _) =>
+        {
+            // the new exe waits for this one's single-instance lock (see App), then starts as usual
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--updated") { UseShellExecute = false })?.Dispose();
+            Application.Current.Shutdown();
+        }));
+        tray.ShowBalloonTip(8000, "NAS 搜索", $"新版本 {v} 已下载，下次启动时生效。右键托盘图标可以立即重启", System.Windows.Forms.ToolTipIcon.Info);
+    }
 
     public void ShowBar()
     {

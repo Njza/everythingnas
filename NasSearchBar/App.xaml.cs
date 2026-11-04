@@ -11,6 +11,11 @@ public partial class App : Application
     {
         base.OnStartup(e);
         single = new Mutex(true, @"Local\NasSearchBar", out var first);
+        if (!first && e.Args.Contains("--updated"))  // restarted by an update: the old instance is closing
+        {
+            try { first = single.WaitOne(TimeSpan.FromSeconds(15)); }
+            catch (AbandonedMutexException) { first = true; }  // it exited without letting go: ours now
+        }
         if (!first)
         {
             MessageBox.Show("NAS 搜索已经在运行，按快捷键或点右下角图标打开", "NAS 搜索");

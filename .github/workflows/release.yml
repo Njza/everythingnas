@@ -1,0 +1,54 @@
+# Pushing a tag like v1.6.0 builds the exe with that version, tests it, and publishes a GitHub release with
+# the exe and the two server files. Installed search bars pick it up within 12 hours (Updater.cs).
+#   git tag v1.6.0 && git push origin v1.6.0
+# A tag with a suffix (v1.6.0-beta) becomes a pre-release, which the search bars do not update to.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write  # create the release
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+
+      - name: Test the server
+        run: python -m unittest test_nas_search
+      - name: Test the search bar
+        run: dotnet test NasSearchBar.Tests
+
+      - name: Build the exe as this tag's version
+        shell: bash
+        run: dotnet publish NasSearchBar -c Release -o dist -p:Version="${GITHUB_REF_NAME#v}"
+
+      # The updater compares this version with the tag: a mismatch would make every bar download it again and again
+      - name: Check the exe's version
+        shell: pwsh
+        run: |
+          $tag = "$env:GITHUB_REF_NAME".TrimStart('v').Split('-')[0]
+          $exe = [Version](Get-Item dist/NasSearch.exe).VersionInfo.FileVersion
+          $want = [Version]$tag
+          if ($exe.Major -ne $want.Major -or $exe.Minor -ne $want.Minor -or [Math]::Max($exe.Build, 0) -ne [Math]::Max($want.Build, 0)) {
+            throw "exe is $exe, tag is $tag"
+          }
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          [[ "$GITHUB_REF_NAME" == *-* ]] && pre="--prerelease"
+          gh release create "$GITHUB_REF_NAME" dist/NasSearch.exe nas_search.py docker-compose.yml \
+            --title "$GITHUB_REF_NAME" --generate-notes --verify-tag $pre

@@ -19,7 +19,7 @@
     <RollForward>Major</RollForward>
     <AssemblyName>NasSearch</AssemblyName>
     <!-- bump on every release build; shows in the settings window and the exe's file properties -->
-    <Version>1.5.0</Version>
+    <Version>1.6.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- symbols inside the exe: crash traces keep file and line, and dist holds just the one file -->
     <DebugType>embedded</DebugType>
