@@ -4,7 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:local="clr-namespace:NasSearchBar"
         Title="NAS 搜索" Width="680" SizeToContent="Height"
-        Background="{StaticResource Surface}"
+        Background="{DynamicResource Surface}" Foreground="{DynamicResource Primary}"
         ResizeMode="NoResize" ShowInTaskbar="False"
         FontFamily="Segoe UI, Microsoft YaHei UI" FontSize="14"
         TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
@@ -18,8 +18,8 @@
 
     <Window.Resources>
         <Style x:Key="Keycap" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource Hover}" />
-            <Setter Property="BorderBrush" Value="{StaticResource Hairline}" />
+            <Setter Property="Background" Value="{DynamicResource Hover}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Hairline}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="4" />
             <Setter Property="Padding" Value="6,1" />
@@ -29,11 +29,11 @@
         <Style x:Key="KeyText" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="{StaticResource Mono}" />
             <Setter Property="FontSize" Value="11" />
-            <Setter Property="Foreground" Value="{StaticResource Secondary}" />
+            <Setter Property="Foreground" Value="{DynamicResource Secondary}" />
         </Style>
         <Style x:Key="Hint" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="{StaticResource Muted}" />
+            <Setter Property="Foreground" Value="{DynamicResource Muted}" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,0,16,0" />
         </Style>
@@ -50,11 +50,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource Hover}" />
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource Hover}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource Raised}" />
-                                <Setter TargetName="Bg" Property="BorderBrush" Value="{StaticResource Hairline}" />
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource Raised}" />
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="{DynamicResource Hairline}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -77,7 +77,7 @@
                         <Border x:Name="B" CornerRadius="6" Background="Transparent">
                             <Viewbox Width="16" Height="16">
                                 <Canvas Width="24" Height="24">
-                                    <Path x:Name="Icon" Stroke="{StaticResource Muted}" StrokeThickness="2.25" Fill="Transparent"
+                                    <Path x:Name="Icon" Stroke="{DynamicResource Muted}" StrokeThickness="2.25" Fill="Transparent"
                                           StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
                                           Data="M12,17 V22 M5,17 H19 V15.24 A2,2 0 0 0 17.89,13.45 L16.11,12.55 A2,2 0 0 1 15,10.76 V6 H16 A2,2 0 0 0 16,2 H8 A2,2 0 0 0 8,6 H9 V10.76 A2,2 0 0 1 7.89,12.55 L6.11,13.45 A2,2 0 0 0 5,15.24 Z" />
                                 </Canvas>
@@ -85,12 +85,12 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <DataTrigger Binding="{Binding Pinned}" Value="True">
-                                <Setter TargetName="Icon" Property="Fill" Value="{StaticResource Secondary}" />
-                                <Setter TargetName="Icon" Property="Stroke" Value="{StaticResource Secondary}" />
+                                <Setter TargetName="Icon" Property="Fill" Value="{DynamicResource Secondary}" />
+                                <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Secondary}" />
                             </DataTrigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#0F171717" />
-                                <Setter TargetName="Icon" Property="Stroke" Value="{StaticResource Primary}" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource Raised}" />
+                                <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Primary}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -128,12 +128,12 @@
 
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Name}" FontSize="14" LineHeight="20" LineStackingStrategy="BlockLineHeight"
-                               Foreground="{StaticResource Primary}" TextTrimming="CharacterEllipsis" />
+                               Foreground="{DynamicResource Primary}" TextTrimming="CharacterEllipsis" />
                     <!-- C:\Users\...\ trims when narrow; the folder holding the file always shows whole -->
                     <local:ShrinkFirstPanel Height="18" Margin="0,2,0,0" ToolTip="{Binding Location}" Background="Transparent">
-                        <TextBlock Text="{Binding LocationOuter}" FontSize="12" Foreground="{StaticResource Muted}"
+                        <TextBlock Text="{Binding LocationOuter}" FontSize="12" Foreground="{DynamicResource Muted}"
                                    TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding LocationInner}" FontSize="12" Foreground="{StaticResource Secondary}"
+                        <TextBlock Text="{Binding LocationInner}" FontSize="12" Foreground="{DynamicResource Secondary}"
                                    VerticalAlignment="Center" />
                     </local:ShrinkFirstPanel>
                 </StackPanel>
@@ -152,9 +152,9 @@
                         </Style>
                     </StackPanel.Style>
                     <TextBlock Text="{Binding SizeText}" HorizontalAlignment="Right" FontSize="12"
-                               LineHeight="20" LineStackingStrategy="BlockLineHeight" Foreground="{StaticResource Secondary}" />
+                               LineHeight="20" LineStackingStrategy="BlockLineHeight" Foreground="{DynamicResource Secondary}" />
                     <TextBlock Text="{Binding DateText}" HorizontalAlignment="Right" FontSize="12" Margin="0,2,0,0"
-                               LineHeight="18" LineStackingStrategy="BlockLineHeight" Foreground="{StaticResource Muted}" />
+                               LineHeight="18" LineStackingStrategy="BlockLineHeight" Foreground="{DynamicResource Muted}" />
                 </StackPanel>
 
                 <Button Grid.Column="3" Style="{StaticResource PinButton}" Click="Pin_Click" />
@@ -173,20 +173,20 @@
                     <!-- lucide "search", 18px, stroke 1.5 -->
                     <Viewbox Width="18" Height="18" Margin="0,0,12,0">
                         <Canvas Width="24" Height="24">
-                            <Path Stroke="{StaticResource Muted}" StrokeThickness="2"
+                            <Path Stroke="{DynamicResource Muted}" StrokeThickness="2"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="M11,3 A8,8 0 1 1 11,19 A8,8 0 1 1 11,3 Z M21,21 L16.65,16.65" />
                         </Canvas>
                     </Viewbox>
-                    <TextBlock x:Name="Placeholder" Grid.Column="1" Text="搜索 NAS" FontSize="18" Margin="3,0,0,0"
-                               Foreground="{StaticResource Muted}" VerticalAlignment="Center" IsHitTestVisible="False" />
+                    <TextBlock x:Name="Placeholder" Grid.Column="1" Text="搜索文件" FontSize="18" Margin="3,0,0,0"
+                               Foreground="{DynamicResource Muted}" VerticalAlignment="Center" IsHitTestVisible="False" />
                     <TextBox x:Name="Query" Grid.Column="1" FontSize="18" VerticalAlignment="Center"
-                             Background="Transparent" BorderThickness="0" Foreground="{StaticResource Primary}"
-                             CaretBrush="{StaticResource Accent}" SelectionBrush="{StaticResource Accent}"
+                             Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Primary}"
+                             CaretBrush="{DynamicResource Accent}" SelectionBrush="{DynamicResource Accent}"
                              TextChanged="Query_TextChanged" />
                     <TextBlock x:Name="Status" Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
                                MaxWidth="320" TextTrimming="CharacterEllipsis"
-                               FontFamily="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Muted}" />
+                               FontFamily="{StaticResource Mono}" FontSize="12" Foreground="{DynamicResource Muted}" />
 
                     <!-- lucide "funnel": pick the formats to search; blue while a filter is on -->
                     <Button x:Name="FilterButton" Grid.Column="3" Width="28" Height="28" Margin="8,0,-4,0"
@@ -196,19 +196,19 @@
                                 <Border x:Name="B" CornerRadius="6" Background="Transparent">
                                     <Viewbox Width="16" Height="16">
                                         <Canvas Width="24" Height="24">
-                                            <Path x:Name="Icon" Stroke="{StaticResource Muted}" StrokeThickness="2" Fill="Transparent"
+                                            <Path x:Name="Icon" Stroke="{DynamicResource Muted}" StrokeThickness="2.25" Fill="Transparent"
                                                   StrokeLineJoin="Round" Data="M22,3 H2 L10,12.46 V19 L14,21 V12.46 Z" />
                                         </Canvas>
                                     </Viewbox>
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="B" Property="Background" Value="#0F171717" />
-                                        <Setter TargetName="Icon" Property="Stroke" Value="{StaticResource Primary}" />
+                                        <Setter TargetName="B" Property="Background" Value="{DynamicResource Raised}" />
+                                        <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Primary}" />
                                     </Trigger>
                                     <Trigger Property="Tag" Value="on">
-                                        <Setter TargetName="Icon" Property="Stroke" Value="{StaticResource Accent}" />
-                                        <Setter TargetName="Icon" Property="Fill" Value="{StaticResource Accent}" />
+                                        <Setter TargetName="Icon" Property="Stroke" Value="{DynamicResource Accent}" />
+                                        <Setter TargetName="Icon" Property="Fill" Value="{DynamicResource Accent}" />
                                     </Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -217,30 +217,35 @@
 
                     <!-- opaque, not AllowsTransparency, so its text keeps ClearType like the bar -->
                     <Popup x:Name="FilterPopup" PlacementTarget="{Binding ElementName=FilterButton}" Placement="Bottom"
-                           HorizontalOffset="-216" VerticalOffset="10" StaysOpen="False" Closed="FilterPopup_Closed">
-                        <Border Width="244" Padding="12" Background="{StaticResource Surface}"
-                                BorderBrush="{StaticResource InputLine}" BorderThickness="1">
+                           HorizontalOffset="-216" VerticalOffset="12" StaysOpen="False" Opened="FilterPopup_Opened" Closed="FilterPopup_Closed">
+                        <Border Width="244" Padding="12" Background="{DynamicResource Surface}"
+                                BorderBrush="{DynamicResource InputLine}" BorderThickness="1">
                             <StackPanel>
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Content="全部显示" Focusable="False" Cursor="Hand"
                                             Click="FilterAll_Click">
                                         <Button.Template>
                                             <ControlTemplate TargetType="Button">
-                                                <TextBlock Text="{TemplateBinding Content}" FontSize="12" Foreground="{StaticResource Accent}" />
+                                                <TextBlock x:Name="T" Text="{TemplateBinding Content}" FontSize="12" Foreground="{DynamicResource Accent}" />
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="T" Property="TextDecorations" Value="Underline" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
                                             </ControlTemplate>
                                         </Button.Template>
                                     </Button>
-                                    <TextBlock Text="只显示勾选的格式" FontSize="12" Foreground="{StaticResource Secondary}" />
+                                    <TextBlock Text="只显示勾选的格式" FontSize="12" Foreground="{DynamicResource Secondary}" />
                                 </DockPanel>
-                                <Grid Margin="0,8,0,0">
-                                    <TextBlock x:Name="FilterHint" Text="找格式，如 pdf" FontSize="13" Margin="9,0,0,0"
-                                               Foreground="{StaticResource Muted}" VerticalAlignment="Center" IsHitTestVisible="False" />
-                                    <TextBox x:Name="FilterSearch" FontSize="13" Padding="6,5" Background="Transparent"
-                                             BorderBrush="{StaticResource InputLine}" Foreground="{StaticResource Primary}"
-                                             CaretBrush="{StaticResource Accent}" SelectionBrush="{StaticResource Accent}"
+                                <Grid Margin="0,12,0,0">
+                                    <TextBox x:Name="FilterSearch" Style="{StaticResource Field}" Height="32" FontSize="13"
+                                             CaretBrush="{DynamicResource Accent}" SelectionBrush="{DynamicResource Accent}"
                                              TextChanged="FilterSearch_TextChanged" />
+                                    <!-- over the field (which paints its own surface), lined up with its text -->
+                                    <TextBlock x:Name="FilterHint" Text="找格式，如 pdf" FontSize="13" Margin="11,0,0,0"
+                                               Foreground="{DynamicResource Muted}" VerticalAlignment="Center" IsHitTestVisible="False" />
                                 </Grid>
-                                <TextBlock x:Name="FilterStatus" FontSize="12" Margin="0,6,0,8" Foreground="{StaticResource Muted}" />
+                                <TextBlock x:Name="FilterStatus" FontSize="12" Margin="0,8,0,8" Foreground="{DynamicResource Muted}" />
                                 <ListBox x:Name="FilterList" MaxHeight="320" Background="Transparent" BorderThickness="0"
                                          Focusable="False" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                          VirtualizingPanel.IsVirtualizing="True">
@@ -260,7 +265,7 @@
                                         <DataTemplate>
                                             <DockPanel>
                                                 <TextBlock DockPanel.Dock="Right" Text="{Binding Count, StringFormat=N0}" FontSize="12"
-                                                           Foreground="{StaticResource Muted}" Typography.NumeralAlignment="Tabular" />
+                                                           Foreground="{DynamicResource Muted}" Typography.NumeralAlignment="Tabular" />
                                                 <CheckBox IsChecked="{Binding On}" Content="{Binding Ext}" Focusable="False" />
                                             </DockPanel>
                                         </DataTemplate>
@@ -270,7 +275,12 @@
                                         HorizontalAlignment="Left" Click="Rare_Click">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
-                                            <TextBlock Text="{TemplateBinding Content}" FontSize="12" Foreground="{StaticResource Accent}" />
+                                            <TextBlock x:Name="T" Text="{TemplateBinding Content}" FontSize="12" Foreground="{DynamicResource Accent}" />
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="T" Property="TextDecorations" Value="Underline" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
@@ -280,14 +290,14 @@
                 </Grid>
 
                 <StackPanel x:Name="ResultsPanel" Visibility="Collapsed">
-                    <Border Height="1" Background="{StaticResource Hairline}" />
+                    <Border Height="1" Background="{DynamicResource Hairline}" />
                     <ListBox x:Name="Results" MaxHeight="432" Padding="8" Focusable="False"
                              Background="Transparent" BorderThickness="0"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Hidden"
                              ItemContainerStyle="{StaticResource Row}" ItemTemplate="{StaticResource RowTemplate}"
                              PreviewMouseLeftButtonUp="Results_Click" PreviewMouseRightButtonUp="Results_RightClick" />
-                    <Border Height="1" Background="{StaticResource Hairline}" />
+                    <Border Height="1" Background="{DynamicResource Hairline}" />
                     <StackPanel Orientation="Horizontal" Height="36" Margin="16,0">
                         <Border Style="{StaticResource Keycap}"><TextBlock Text="Enter" Style="{StaticResource KeyText}" /></Border>
                         <TextBlock Text="打开" Style="{StaticResource Hint}" />

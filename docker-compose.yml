@@ -9,7 +9,7 @@ services:
     volumes:
       - ./nas_search.py:/app/nas_search.py:ro
       # One line per shared folder to search. Keep the share name after /data/ so the \\NAS\share paths are right.
-      # Everyone who can open the page sees these file names, so only list shares that is fine for.
+      # Everyone on the LAN who can reach port 8765 can search these file names, so only list shares that is fine for.
       - /volume1/video:/data/video:ro
       - /volume1/photo:/data/photo:ro
     ports:

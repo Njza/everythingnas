@@ -1,0 +1,15 @@
+<Window x:Class="NasSearchBar.IndexingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="NAS 搜索" Width="400" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen" Background="{DynamicResource Surface}"
+        FontFamily="Segoe UI, Microsoft YaHei UI" FontSize="14"
+        Foreground="{DynamicResource Primary}" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
+    <StackPanel Margin="24">
+        <TextBlock Text="正在建立索引" FontSize="16" FontWeight="Medium" />
+        <TextBlock Margin="0,8,0,0" FontSize="13" LineHeight="20" Foreground="{DynamicResource Secondary}" TextWrapping="Wrap"
+                   Text="在读本机硬盘的文件列表，读完会自动关闭，然后就能搜索" />
+        <TextBlock x:Name="Count" Margin="0,16,0,0" FontFamily="{StaticResource Mono}" FontSize="12"
+                   Foreground="{DynamicResource Muted}" Typography.NumeralAlignment="Tabular" />
+    </StackPanel>
+</Window>

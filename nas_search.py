@@ -1,6 +1,6 @@
 """Everything-style instant file name search for a Synology NAS.
 
-Scans ROOT every SCAN_MINUTES, keeps all names in memory and serves a search page.
+Scans ROOT every SCAN_MINUTES, keeps all names in memory and answers /search and /exts for NasSearch.exe.
 Standard library only, so it runs in the stock python Docker image.
 """
 import base64
@@ -8,7 +8,6 @@ import hmac
 import json
 import os
 import re
-import stat
 import threading
 import time
 from array import array
@@ -29,10 +28,13 @@ LIMIT = 200
 
 # Entries sorted by lowercase name; parent indexes dirs (relative to ROOT, like "/video/Movies").
 # big is every lowercase name between \0 separators, starts[i] the offset of the \0 before entry i.
-Index = namedtuple('Index', 'names lows parent isdir dirs big starts scanned')
+# size (-1 for folders) and mtime come from the scan, so a search reads no disk.
+Index = namedtuple('Index', 'names lows parent isdir dirs big starts scanned size mtime')
 
 
-def pack(names, parent, isdir, dirs, scanned):
+def pack(names, parent, isdir, dirs, scanned, size=None, mtime=None):
+    size = size or array('q', bytes(8 * len(names)))
+    mtime = mtime or array('d', bytes(8 * len(names)))
     lows = [n.lower() for n in names]
     order = sorted(range(len(names)), key=lows.__getitem__)
     big = '\0' + '\0'.join([lows[i] for i in order]) + '\0'
@@ -41,7 +43,8 @@ def pack(names, parent, isdir, dirs, scanned):
     lows = big[1:-1].split('\0') if names else []
     starts = array('q', accumulate(map(add, map(len, lows), repeat(1)), initial=0))
     return Index(names, lows, [parent[i] for i in order], bytearray(map(isdir.__getitem__, order)),
-                 dirs, big, starts, scanned)
+                 dirs, big, starts, scanned, array('q', map(size.__getitem__, order)),
+                 array('d', map(mtime.__getitem__, order)))
 
 
 INDEX = pack([], [], bytearray(), [''], 0)
@@ -53,16 +56,36 @@ def skip(d):
 
 
 def build():
-    # shortcut: full rescan, ~300 MB RAM per million entries (about double during a rescan);
-    # upgrade to inotify + SQLite if the NAS grows past a few million files.
+    # shortcut: full rescan, ~320 MB RAM per million entries (about double during a rescan); a file deleted since
+    # the last scan stays listed until the next one. Upgrade to inotify + SQLite past a few million files.
     names, parent, isdir, dirs = [], [], bytearray(), []
-    for dirpath, dirnames, filenames in os.walk(ROOT):
-        dirnames[:] = [d for d in dirnames if not skip(d)]
-        parent += [len(dirs)] * (len(dirnames) + len(filenames))
-        dirs.append(dirpath[len(ROOT):])
-        names += dirnames + filenames
-        isdir += b'\1' * len(dirnames) + b'\0' * len(filenames)
-    return pack(names, parent, isdir, dirs, time.time())
+    size, mtime = array('q'), array('d')
+    todo = ['']  # folders still to list, relative to ROOT
+    while todo:
+        rel = todo.pop()
+        here = len(dirs)
+        dirs.append(rel)
+        try:
+            entries = os.scandir(ROOT + rel)
+        except OSError:  # gone or unreadable since its folder was listed
+            continue
+        with entries:
+            for e in entries:
+                try:
+                    folder = e.is_dir(follow_symlinks=False)  # like os.walk: never into a linked folder
+                    if folder and skip(e.name):
+                        continue
+                    st = e.stat(follow_symlinks=False)  # one stat per entry per scan, none per search
+                except OSError:
+                    continue
+                names.append(e.name)
+                parent.append(here)
+                isdir.append(folder)
+                size.append(-1 if folder else st.st_size)
+                mtime.append(st.st_mtime)
+                if folder:
+                    todo.append(rel + '/' + e.name)
+    return pack(names, parent, isdir, dirs, time.time(), size, mtime)
 
 
 # Everything syntax: space = AND, | = OR (binds tighter than AND), ! = NOT, < > = group, "..." = plain text
@@ -245,15 +268,8 @@ def path_contains(ix, cand, s, case):
 def search(q):
     ix = INDEX  # one snapshot: the scan thread swaps INDEX while searches run
     hits = match(parse(q), ix, range(len(ix.names)))
-    out = []
-    for i in hits[:LIMIT]:
-        d = ix.dirs[ix.parent[i]]
-        try:
-            st = os.stat(ROOT + d + '/' + ix.names[i])
-        except OSError:  # deleted since the last scan
-            continue
-        out.append({'name': ix.names[i], 'path': '\\\\' + NAS + d.replace('/', '\\'),
-                    'size': None if stat.S_ISDIR(st.st_mode) else st.st_size, 'mtime': st.st_mtime})
+    out = [{'name': ix.names[i], 'path': '\\\\' + NAS + ix.dirs[ix.parent[i]].replace('/', '\\'),
+            'size': None if ix.size[i] < 0 else ix.size[i], 'mtime': ix.mtime[i]} for i in hits[:LIMIT]]
     return {'total': len(hits), 'indexed': len(ix.names), 'scanned': ix.scanned, 'results': out}
 
 
@@ -298,8 +314,16 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == '/exts':
             body = json.dumps(exts()).encode()
             ctype = 'application/json'
+        elif u.path == '/':  # no search page: NasSearch.exe is the client; this line shows the server is up
+            ix = INDEX
+            state = f'{len(ix.names)} entries indexed' if ix.scanned else 'first scan running'
+            body = f'nas-search: {state}. Search with NasSearch.exe.\n'.encode()
+            ctype = 'text/plain; charset=utf-8'
         else:
-            body, ctype = PAGE, 'text/html; charset=utf-8'
+            self.send_response(404)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(body)))
@@ -308,63 +332,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
-
-
-PAGE = r'''<!doctype html>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NAS Search</title>
-<style>
-:root { color-scheme: light dark; font: 14px system-ui, "Microsoft YaHei", sans-serif; }
-body { margin: 0; padding: 12px 16px; }
-#q { width: 100%; box-sizing: border-box; font-size: 18px; padding: 8px 10px; }
-#st { margin: 8px 0; opacity: .7; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 4px 8px; white-space: nowrap; }
-td:nth-child(2) { white-space: normal; word-break: break-all; opacity: .7; }
-td:nth-child(3) { text-align: right; }
-tbody tr { cursor: pointer; }
-tbody tr:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
-</style>
-<input id="q" autofocus autocomplete="off"
-  placeholder="搜索文件名　空格 = 并且　a|b = 或者　!词 = 排除　&quot;带 空格&quot;　*.mkv　ext:pdf;docx　含 \ = 匹配路径">
-<div id="st"></div>
-<table><thead><tr><th>名称</th><th>路径</th><th>大小</th><th>修改时间</th></tr></thead><tbody id="r"></tbody></table>
-<script>
-let timer, seq = 0;
-q.oninput = () => { clearTimeout(timer); timer = setTimeout(go, 120); };
-
-function size(n) {
-  if (n == null) return '';
-  const u = Math.min(4, Math.floor(Math.log(Math.max(n, 1)) / Math.log(1024)));
-  return u ? (n / 1024 ** u).toFixed(1) + ' ' + 'KMGT'[u - 1] + 'B' : n + ' B';
-}
-
-function copy(s) {
-  // navigator.clipboard needs HTTPS; this works on plain http://nas:port
-  const a = document.createElement('textarea');
-  a.value = s; document.body.append(a); a.select(); document.execCommand('copy'); a.remove();
-  st.textContent = '已复制：' + s + '　（Win+R 粘贴回车即可打开）';
-}
-
-async function go() {
-  const my = ++seq;
-  let d;
-  try { d = await (await fetch('search?q=' + encodeURIComponent(q.value))).json(); }
-  catch (e) { st.textContent = '连接失败'; return; }
-  if (my !== seq) return;  // a newer query already went out
-  st.textContent = d.total + ' 个结果' + (d.total > d.results.length ? '，显示前 ' + d.results.length + ' 个' : '') +
-    '　·　索引 ' + d.indexed + ' 项，' + (d.scanned ? '更新于 ' + new Date(d.scanned * 1000).toLocaleString() : '首次扫描中…');
-  r.replaceChildren(...d.results.map(x => {
-    const tr = document.createElement('tr');
-    [x.name + (x.size == null ? '\\' : ''), x.path, size(x.size), new Date(x.mtime * 1000).toLocaleString()]
-      .forEach(v => tr.insertCell().textContent = v);
-    tr.onclick = () => copy(x.path + '\\' + x.name);
-    return tr;
-  }));
-}
-go();
-</script>
-'''.encode()
 
 
 if __name__ == '__main__':

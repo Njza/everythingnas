@@ -18,14 +18,15 @@ public partial class MainWindow : Window
 {
     const int HotkeyId = 1, WM_HOTKEY = 0x0312;
     const uint MOD_NOREPEAT = 0x4000;
-    static readonly Brush Muted = new SolidColorBrush(Color.FromRgb(0x73, 0x73, 0x73));
-    static readonly Brush Negative = new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26));
 
-    readonly DispatcherTimer debounce = new() { Interval = TimeSpan.FromMilliseconds(120) };
+    // this PC answers in 15-100 ms; the pause only groups keystrokes typed in one burst
+    readonly DispatcherTimer debounce = new() { Interval = TimeSpan.FromMilliseconds(60) };
     readonly System.Windows.Forms.NotifyIcon tray;
     CancellationTokenSource? inflight;
     Settings settings = new();
-    NasClient? client;
+    NasClient? nas;  // null when no address is set: then only this PC is searched
+    // this PC's drives, always searched; scanned once at start, kept across settings changes
+    static readonly LocalIndex local = new(LocalIndex.FixedDrives(), TimeSpan.FromMinutes(30));
     SettingsWindow? settingsWindow;
     readonly Pins pins = new(Pins.FilePath);
     Hit[] found = [];  // the last search results, in server order
@@ -43,7 +44,7 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
-    const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2;
+    const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2, DWMWCP_ROUNDSMALL = 3;
 
     [DllImport("dwmapi.dll")]
     static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
@@ -56,6 +57,7 @@ public partial class MainWindow : Window
         Closing += (_, e) => { e.Cancel = true; Hide(); };
         LoadSettings();
         hwnd = new WindowInteropHelper(this).EnsureHandle();  // the hotkey needs a window handle before the first show
+        Theme.Frame(hwnd);
         HwndSource.FromHwnd(hwnd).AddHook(WndProc);
         var round = DWMWCP_ROUND;  // Windows 11 round corners; Windows 10 ignores it (square corners)
         DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
@@ -79,7 +81,7 @@ public partial class MainWindow : Window
             settings = new();
             SetStatus("设置文件读不了，请重新设置", error: true);
         }
-        client = settings.Server is { } server
+        nas = settings.Server is { } server
             ? new NasClient(server, settings.User, Secret.Unprotect(settings.ProtectedPassword))
             : null;
         ShowFilter();
@@ -129,7 +131,7 @@ public partial class MainWindow : Window
         ShowChoices();
     }
 
-    // Lists the saved formats at once, then every format the server has indexed
+    // Lists the saved formats at once, then every format this PC and the NAS have indexed
     async void Filter_Click(object sender, RoutedEventArgs e)
     {
         choices = settings.Exts.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(x => new ExtChoice(x, 0, true)).ToList();
@@ -139,26 +141,41 @@ public partial class MainWindow : Window
         FilterStatus.Text = "正在读取格式…";
         FilterPopup.IsOpen = true;
         FilterSearch.Focus();
-        if (client is null)
+        var nasExts = nas?.ExtsAsync(CancellationToken.None);
+        var mine = (await local.ExtsAsync(CancellationToken.None)).Exts;
+        ExtCount[] theirs = [];
+        string? note = null;
+        if (nasExts is not null)
         {
-            FilterStatus.Text = "先在设置里填 NAS 地址";
-            return;
+            try { theirs = (await nasExts).Exts; }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            {
+                note = "连不上 NAS";
+            }
         }
-        try
+        var all = mine.Concat(theirs)
+            .GroupBy(x => x.Ext, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ExtCount(g.Key, g.Sum(x => x.Count)))
+            .OrderByDescending(x => x.Count)
+            .ToArray();
+        if (!FilterPopup.IsOpen) return;  // closed while loading; closing already saved the ticks
+        var on = Ticked();  // includes any ticked while loading
+        var known = all.Select(x => x.Ext).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        choices = on.Where(x => !known.Contains(x)).Select(x => new ExtChoice(x, 0, true))  // saved, no longer on this PC or the NAS
+            .Concat(all.Select(x => new ExtChoice(x.Ext, x.Count, on.Contains(x.Ext))))
+            .ToList();
+        ShowChoices();
+        FilterStatus.Text = $"{all.Length:N0} 种格式，不勾 = 全部" + (note is null ? "" : $"（{note}）");
+    }
+
+    // Windows 11 gives the opaque popup small round corners and a frame, like its own menus; Windows 10 ignores it
+    void FilterPopup_Opened(object? sender, EventArgs e)
+    {
+        if (PresentationSource.FromVisual(FilterPopup.Child) is HwndSource src)
         {
-            var all = (await client.ExtsAsync(CancellationToken.None)).Exts;
-            if (!FilterPopup.IsOpen) return;  // closed while loading; closing already saved the ticks
-            var on = Ticked();  // includes any ticked while loading
-            var known = all.Select(x => x.Ext).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            choices = on.Where(x => !known.Contains(x)).Select(x => new ExtChoice(x, 0, true))  // saved, gone from the NAS
-                .Concat(all.Select(x => new ExtChoice(x.Ext, x.Count, on.Contains(x.Ext))))
-                .ToList();
-            ShowChoices();
-            FilterStatus.Text = $"{all.Length:N0} 种格式，不勾 = 全部";
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
-        {
-            FilterStatus.Text = "连不上后端，读不到格式";
+            var round = DWMWCP_ROUNDSMALL;
+            DwmSetWindowAttribute(src.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
+            Theme.Frame(src.Handle);
         }
     }
 
@@ -235,8 +252,25 @@ public partial class MainWindow : Window
         return IntPtr.Zero;
     }
 
+    IndexingWindow? indexing;
+
     public void ShowBar()
     {
+        if (!local.Ready)  // the bar is usable once this PC's index is built; until then a dialog shows the progress
+        {
+            if (indexing is null)
+            {
+                indexing = new IndexingWindow(local);
+                indexing.Closed += (_, _) =>
+                {
+                    indexing = null;
+                    if (local.Ready) ShowBar();  // it closed itself because the index is ready
+                };
+                indexing.Show();
+            }
+            indexing.Activate();
+            return;
+        }
         Render();
         if (!IsVisible)  // it lives on the desktop: placed once, then left where it is
         {
@@ -281,29 +315,42 @@ public partial class MainWindow : Window
             Render();  // the pins
             return;
         }
-        if (client is null)
-        {
-            found = [];
-            Render();
-            SetStatus("先在设置里填 NAS 地址", error: true);
-            return;
-        }
-        SetStatus("搜索中…");  // an unreachable server takes up to the 5 s timeout to fail
+        q = settings.Filtered(q);
+        var nasTask = nas?.SearchAsync(q, cts.Token);  // asked first, so it runs while this PC is searched
+        SearchResponse mine;
         try
         {
-            var data = await client.SearchAsync(settings.Filtered(q), cts.Token);
-            if (cts.IsCancellationRequested) return;  // a newer query already ran
-            found = data.Results;
-            Render();
-            SetStatus($"{data.Total:N0} 个结果");
+            mine = await local.SearchAsync(q, cts.Token);
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or JsonException)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { return; }
+        if (cts.IsCancellationRequested) return;  // a newer query already ran
+        // This PC's results show at once; the NAS's join them when they come (a slow or unreachable NAS takes up
+        // to the 5 s timeout). Not awaited here, so Enter opens what is listed now instead of waiting for the NAS.
+        found = mine.Results;
+        Render();
+        SetStatus($"{mine.Total:N0} 个结果" + (nasTask is null ? "" : " · 正在搜 NAS…"));
+        if (nasTask is not null) _ = AddNasResults(nasTask, mine, cts);
+    }
+
+    async Task AddNasResults(Task<SearchResponse> nasTask, SearchResponse mine, CancellationTokenSource cts)
+    {
+        SearchResponse? theirs = null;
+        string? nasError = null;
+        try { theirs = await nasTask; }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { return; }
+        catch (Exception e) when (e is HttpRequestException or JsonException or OperationCanceledException)
         {
-            found = [];
-            Render();
-            SetStatus(e is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } ? "账号或密码不对" : $"连不上 {settings.Address}，后端开了吗", error: true);
+            nasError = e is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } ? "NAS 账号或密码不对" : $"连不上 NAS {settings.Address}";
         }
+        if (cts.IsCancellationRequested) return;  // a newer query already ran
+        if (theirs is not null)
+        {
+            found = mine.Results.Concat(theirs.Results)
+                .OrderBy(h => h.Name.ToLowerInvariant(), StringComparer.Ordinal)  // both lists come in name order
+                .ToArray();
+            Render(Results.SelectedItem as Hit);  // the selected row stays selected as the NAS's rows slot in
+        }
+        SetStatus($"{mine.Total + (theirs?.Total ?? 0):N0} 个结果" + (nasError is null ? "" : "，" + nasError), error: nasError is not null);
     }
 
     // Empty box: the pins. Otherwise the search results with pinned ones first.
@@ -354,7 +401,7 @@ public partial class MainWindow : Window
     void SetStatus(string text, bool error = false)
     {
         Status.Text = text;
-        Status.Foreground = error ? Negative : Muted;
+        Status.SetResourceReference(TextBlock.ForegroundProperty, error ? "Negative" : "Muted");  // follows a theme switch
     }
 
     async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -417,8 +464,9 @@ public partial class MainWindow : Window
         var path = h.OpenPath;  // the same path the row shows
         try
         {
-            if (folder) Launch("explorer.exe", $"/select,\"{path}\"");
-            else Launch(path);  // default app: Word, Excel, Photos...
+            // through explorer, which hands it to the desktop's own Explorer: the app it starts (Word, Excel,
+            // Photos...) runs as the normal user, not with this app's admin rights
+            Launch("explorer.exe", folder ? $"/select,\"{path}\"" : $"\"{path}\"");
         }
         catch (Win32Exception e)
         {
@@ -426,8 +474,7 @@ public partial class MainWindow : Window
         }
     }
 
-    static void Launch(string file, string? args = null) =>
-        Process.Start(args is null ? new ProcessStartInfo(file) { UseShellExecute = true } : new ProcessStartInfo(file, args))?.Dispose();
+    static void Launch(string file, string args) => Process.Start(new ProcessStartInfo(file, args))?.Dispose();
 
     // the size the tray uses at this scale (16 at 100%, 20 at 125%...), picked from app.ico
     static System.Drawing.Icon TrayIcon()

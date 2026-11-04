@@ -18,6 +18,8 @@ public partial class App : Application
             return;
         }
 
+        AutoStart.MigrateRunKey();
+        Theme.Follow(this);  // before the first window, so it opens in the right colors
         var bar = new MainWindow();
         var hotkeyOk = bar.ApplySavedHotkey();
         if (!hotkeyOk)

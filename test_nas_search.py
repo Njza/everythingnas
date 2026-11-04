@@ -54,9 +54,13 @@ class SearchTest(unittest.TestCase):
         self.assertIsNone(r['Movies']['size'])
         self.assertEqual(r['video']['path'], '\\\\DS')
 
-    def test_file_deleted_since_scan_is_dropped(self):
+    def test_size_and_date_come_from_the_scan(self):
+        # a search reads no disk: a file deleted since the scan stays listed, as scanned, until the next scan
         os.remove(Path(TMP, 'docs/gone.txt'))
-        self.assertEqual(self.names('gone'), [])
+        with mock.patch.object(os, 'stat', side_effect=AssertionError('search touched the disk')):
+            [r] = ns.search('gone')['results']
+        self.assertEqual(r['size'], 1)
+        self.assertGreater(r['mtime'], 0)
 
     def test_or_binds_tighter_than_and(self):
         self.assertEqual(self.names('jpg dog|txt'), ['dog.jpg'])

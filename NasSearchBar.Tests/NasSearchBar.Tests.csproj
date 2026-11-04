@@ -13,6 +13,7 @@
     <Compile Include="../NasSearchBar/Settings.cs" Link="Settings.cs" />
     <Compile Include="../NasSearchBar/NasClient.cs" Link="NasClient.cs" />
     <Compile Include="../NasSearchBar/Pins.cs" Link="Pins.cs" />
+    <Compile Include="../NasSearchBar/LocalIndex.cs" Link="LocalIndex.cs" />
   </ItemGroup>
 
   <ItemGroup>
