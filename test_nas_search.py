@@ -145,5 +145,26 @@ class SearchTest(unittest.TestCase):
             self.assertEqual(ns.search('alien|*.jpg ext:pdf')['total'], 0)
 
 
+class WholeVolumeTest(unittest.TestCase):
+    """The default docker-compose.yml mounts all of /volume1 as /data/volume1: shares are its top folders."""
+
+    def test_volume_folder_is_dropped_from_paths(self):
+        root = tempfile.mkdtemp()
+        for p in ['volume1/video/Movies/Alien.mkv', 'volume1/@appstore/pkg/app.bin', 'volume1/docs/#recycle/old.txt',
+                  'volume2/photo/猫.jpg']:
+            Path(root, p).parent.mkdir(parents=True, exist_ok=True)
+            Path(root, p).write_text('x')
+        with mock.patch.object(ns, 'ROOT', root), mock.patch.object(ns, 'INDEX', None):
+            ns.INDEX = ns.build()
+            r = {x['name']: x['path'] for x in ns.search('')['results']}
+            self.assertEqual(r['Alien.mkv'], '\\\\DS\\video\\Movies')
+            self.assertEqual(r['猫.jpg'], '\\\\DS\\photo')
+            self.assertEqual(r['video'], '\\\\DS')  # a shared folder, at the NAS root like \\DS\video
+            self.assertNotIn('volume1', r)
+            self.assertNotIn('app.bin', r)  # Synology's @ folders, also at the volume's top
+            self.assertNotIn('old.txt', r)
+            self.assertEqual([x['name'] for x in ns.search('video\\ alien')['results']], ['Alien.mkv'])
+
+
 if __name__ == '__main__':
     unittest.main()

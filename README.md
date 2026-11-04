@@ -6,10 +6,11 @@ It runs in Docker on the NAS, rescans the shares on a timer, and answers searche
 
 ## Deploy (DSM 7, Container Manager)
 
-中文完整部署指南（NAS 和电脑端、日常维护、常见问题）：[DEPLOY.zh-CN.md](DEPLOY.zh-CN.md)
+中文部署指南：[DEPLOY.zh-CN.md](DEPLOY.zh-CN.md)
 
 1. Create `/volume1/docker/nas-search/` and copy `nas_search.py` and `docker-compose.yml` into it.
-2. Edit `docker-compose.yml`: set `NAS_NAME`, and list the shares to search under `volumes`.
+2. `docker-compose.yml` needs no edits: it searches every shared folder on `/volume1` (its top folders become
+   `\\NAS\share` paths). Uncomment the `/volume2` line if that volume exists, or list single shares instead.
 3. Container Manager → Project → Create → pick that folder → it finds `docker-compose.yml` → Done.
 4. Open `http://<nas-ip>:8765` to check it runs: one line with the number of indexed entries, or "first scan running"
    (~1M files take a few minutes).

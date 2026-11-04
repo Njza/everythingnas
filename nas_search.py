@@ -51,8 +51,23 @@ INDEX = pack([], [], bytearray(), [''], 0)
 
 
 def skip(d):
-    # Synology metadata (@eaDir thumbnails, @tmp, ...) and recycle bin / snapshots
+    # Synology metadata (@eaDir thumbnails, @tmp, ...; on a whole volume also @appstore, @docker...) and
+    # recycle bin / snapshots
     return d.startswith('@') or d in ('#recycle', '#snapshot')
+
+
+# A whole storage volume mounted as /data/volume1 (the default docker-compose.yml): its top folders are the shared
+# folders, so /volume1/video/Movies is \\NAS\video\Movies. Per-share mounts (/data/video) need no stripping.
+# shortcut: a shared folder itself named like "volume1" would lose that name in its paths; nobody names one so.
+VOLUME = re.compile(r'volume\d+')
+
+
+def unc_dir(rel):
+    """'/volume1/video/Movies' or '/video/Movies' -> '/video/Movies', the folder as \\\\NAS\\... shows it."""
+    head, _, rest = rel[1:].partition('/')
+    if not VOLUME.fullmatch(head):
+        return rel
+    return '/' + rest if rest else ''  # the volume itself is the NAS root, like /data was
 
 
 def build():
@@ -64,7 +79,7 @@ def build():
     while todo:
         rel = todo.pop()
         here = len(dirs)
-        dirs.append(rel)
+        dirs.append(unc_dir(rel))  # only for showing and path terms: searches read no disk
         try:
             entries = os.scandir(ROOT + rel)
         except OSError:  # gone or unreadable since its folder was listed
@@ -77,6 +92,9 @@ def build():
                         continue
                     st = e.stat(follow_symlinks=False)  # one stat per entry per scan, none per search
                 except OSError:
+                    continue
+                if folder and rel == '' and VOLUME.fullmatch(e.name):
+                    todo.append('/' + e.name)  # a mounted volume: list its shares, but it is no entry itself
                     continue
                 names.append(e.name)
                 parent.append(here)

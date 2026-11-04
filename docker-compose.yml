@@ -3,15 +3,19 @@ services:
     image: python:3.15-slim
     command: python -u /app/nas_search.py
     environment:
-      NAS_NAME: DS920        # your NAS's network name, as in \\DS920\video
-      SCAN_MINUTES: 30       # full rescan interval
+      NAS_NAME: NAS          # optional: only shown; the search bar opens files by the address in its settings
+      SCAN_MINUTES: 30       # full rescan interval; each scan wakes the disks
       # AUTH: "me:change-this"   # uncomment to require a login
     volumes:
       - ./nas_search.py:/app/nas_search.py:ro
-      # One line per shared folder to search. Keep the share name after /data/ so the \\NAS\share paths are right.
-      # Everyone on the LAN who can reach port 8765 can search these file names, so only list shares that is fine for.
-      - /volume1/video:/data/video:ro
-      - /volume1/photo:/data/photo:ro
+      # Every shared folder on storage volume 1, read-only. Synology's own folders (@appstore, @docker...),
+      # #recycle and #snapshot are skipped. Everyone on the LAN who can reach port 8765 can search these
+      # file names (set AUTH above to stop that).
+      - /volume1:/data/volume1:ro
+      # A second storage volume: uncomment. Only if it exists, or Docker creates an empty /volume2.
+      # - /volume2:/data/volume2:ro
+      # Only some shared folders instead: delete the /volume1 line and list them, keeping the share name:
+      # - /volume1/video:/data/video:ro
     ports:
       - "8765:8765"
     restart: unless-stopped
