@@ -98,11 +98,11 @@ Pushing a version tag does the rest ([`.github/workflows/release.yml`](.github/w
 suites run, the exe is built with the tag's version, and a release with the exe and the two server files is published.
 
 ```bash
-git tag v1.6.0
-git push origin v1.6.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
-A tag with a suffix (`v1.6.0-beta`) becomes a pre-release. Every push to `main` and every pull request runs the tests
+A tag with a suffix (`v1.1.0-beta`) becomes a pre-release. Every push to `main` and every pull request runs the tests
 and builds the exe as a downloadable artifact ([`ci.yml`](.github/workflows/ci.yml)).
 
 ## Development
