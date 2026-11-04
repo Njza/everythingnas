@@ -24,6 +24,9 @@ SCAN_MINUTES = float(os.environ.get('SCAN_MINUTES', '30'))
 PORT = int(os.environ.get('PORT', '8765'))
 AUTH = os.environ.get('AUTH')  # "user:password" turns on HTTP basic auth
 AUTH = AUTH and 'Basic ' + base64.b64encode(AUTH.encode()).decode()
+# Shared folders left out when a whole volume is mounted, comma-separated. homes holds every user's own folder,
+# whose file names others on the LAN should not see. "" indexes them all.
+SKIP_SHARES = {s.strip().lower() for s in os.environ.get('SKIP_SHARES', 'homes').split(',') if s.strip()}
 LIMIT = 200
 
 # Entries sorted by lowercase name; parent indexes dirs (relative to ROOT, like "/video/Movies").
@@ -88,8 +91,8 @@ def build():
             for e in entries:
                 try:
                     folder = e.is_dir(follow_symlinks=False)  # like os.walk: never into a linked folder
-                    if folder and skip(e.name):
-                        continue
+                    if folder and (skip(e.name) or VOLUME.fullmatch(rel[1:]) and e.name.lower() in SKIP_SHARES):
+                        continue  # the second: a skipped shared folder at the top of a mounted volume
                     st = e.stat(follow_symlinks=False)  # one stat per entry per scan, none per search
                 except OSError:
                     continue

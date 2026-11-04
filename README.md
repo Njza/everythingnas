@@ -18,8 +18,8 @@ come in one list and open straight in their default app.
 
 **NAS** (DSM 7.2+, Container Manager, SMB on):
 
-1. Put `nas_search.py` and `docker-compose.yml` from the [latest release](https://github.com/Njza/everythingnas/releases/latest)
-   into `/volume1/docker/nas-search/`.
+1. Put [`nas_search.py`](https://raw.githubusercontent.com/Njza/everythingnas/main/nas_search.py) and [`docker-compose.yml`](https://raw.githubusercontent.com/Njza/everythingnas/main/docker-compose.yml) from this repo's
+   `main` into `/volume1/docker/nas-search/`.
 2. Container Manager → Project → Create → that folder → use the existing `docker-compose.yml` → Done.
    It needs no edits: it searches every shared folder on `/volume1`, whose top folders become `\\NAS\share` paths.
    Uncomment the `/volume2` line if that volume exists, set `AUTH` to require a login, or list single shares instead.
@@ -90,12 +90,14 @@ the folders instead and walks them again every 30 minutes.
 The search bar checks [the latest release](https://github.com/Njza/everythingnas/releases/latest) at start and every
 12 hours. A newer `NasSearch.exe` is downloaded, checked against GitHub's SHA-256 digest and put in place of the
 running one (which Windows allows to be renamed); it runs from the next start, or at once from the tray menu's
-重启以更新. Pre-releases are skipped. The NAS side is updated by hand: replace `nas_search.py` and restart the project.
+重启以更新. Pre-releases are skipped. The NAS side is not part of releases: take `nas_search.py` from `main`,
+replace it on the NAS and restart the project.
 
 ## Releasing
 
 Pushing a version tag does the rest ([`.github/workflows/release.yml`](.github/workflows/release.yml)): both test
-suites run, the exe is built with the tag's version, and a release with the exe and the two server files is published.
+suites run, the exe is built with the tag's version, and a release with the exe is published. Tag only when the exe
+changed: every tag makes all installed search bars download it.
 
 ```bash
 git tag v1.1.0
@@ -122,7 +124,9 @@ docker run --rm -v "$PWD":/w -v nas-search-nuget:/root/.nuget/packages -w /w/Nas
 
 ## Notes
 
-- Skipped on the NAS: Synology's own folders (`@eaDir`, `@appstore`, every `@` folder), `#recycle`, `#snapshot`.
+- Skipped on the NAS: the `homes` shared folder (every user's own folder; `SKIP_SHARES` in `docker-compose.yml`
+  lists the shares to leave out), Synology's own folders (`@eaDir`, `@appstore`, every `@` folder), `#recycle`,
+  `#snapshot`.
 - RAM: about 320 MB per million entries on the NAS (double during a rescan), about 380 MB for C: with 1.1M on the PC.
 - A NAS file deleted since the last scan stays listed until the next one (`SCAN_MINUTES`, 30 by default); each scan
   wakes the disks.

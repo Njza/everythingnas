@@ -1,5 +1,5 @@
 # Pushing a tag like v1.1.0 builds the exe with that version, tests it, and publishes a GitHub release with
-# the exe and the two server files. Installed search bars pick it up within 12 hours (Updater.cs).
+# the exe; installed search bars pick it up within 12 hours (Updater.cs). The NAS files are taken from main.
 #   git tag v1.1.0 && git push origin v1.1.0
 # A tag with a suffix (v1.1.0-beta) becomes a pre-release, which the search bars do not update to.
 name: Release
@@ -50,5 +50,5 @@ jobs:
         run: |
           pre=""
           [[ "$GITHUB_REF_NAME" == *-* ]] && pre="--prerelease"
-          gh release create "$GITHUB_REF_NAME" dist/NasSearch.exe nas_search.py docker-compose.yml \
+          gh release create "$GITHUB_REF_NAME" dist/NasSearch.exe \
             --title "$GITHUB_REF_NAME" --generate-notes --verify-tag $pre

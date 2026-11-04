@@ -165,6 +165,29 @@ class WholeVolumeTest(unittest.TestCase):
             self.assertNotIn('old.txt', r)
             self.assertEqual([x['name'] for x in ns.search('video\\ alien')['results']], ['Alien.mkv'])
 
+    def test_homes_left_out_of_a_whole_volume(self):
+        root = tempfile.mkdtemp()
+        for p in ['volume1/homes/mei/diary.txt', 'volume1/docs/homes/plan.txt', 'volume1/docs/report.txt']:
+            Path(root, p).parent.mkdir(parents=True, exist_ok=True)
+            Path(root, p).write_text('x')
+        with mock.patch.object(ns, 'ROOT', root), mock.patch.object(ns, 'INDEX', None):
+            ns.INDEX = ns.build()
+            names = [x['name'] for x in ns.search('')['results']]
+            self.assertNotIn('diary.txt', names)  # every user's own folder, at the volume's top
+            self.assertIn('plan.txt', names)  # a folder called homes inside a share is ordinary
+            self.assertIn('report.txt', names)
+            with mock.patch.object(ns, 'SKIP_SHARES', set()):  # SKIP_SHARES: "" indexes homes too
+                ns.INDEX = ns.build()
+                self.assertIn('diary.txt', [x['name'] for x in ns.search('')['results']])
+
+    def test_a_homes_share_mounted_on_its_own_is_searched(self):
+        root = tempfile.mkdtemp()
+        Path(root, 'homes/mei').mkdir(parents=True)
+        Path(root, 'homes/mei/diary.txt').write_text('x')
+        with mock.patch.object(ns, 'ROOT', root), mock.patch.object(ns, 'INDEX', None):
+            ns.INDEX = ns.build()
+            self.assertEqual([x['path'] for x in ns.search('diary')['results']], ['\\\\DS\\homes\\mei'])
+
 
 if __name__ == '__main__':
     unittest.main()

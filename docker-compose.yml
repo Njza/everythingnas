@@ -5,6 +5,7 @@ services:
     environment:
       NAS_NAME: NAS          # optional: only shown; the search bar opens files by the address in its settings
       SCAN_MINUTES: 30       # full rescan interval; each scan wakes the disks
+      SKIP_SHARES: homes     # shared folders not to search, comma-separated; homes = every user's own folder
       # AUTH: "me:change-this"   # uncomment to require a login
     volumes:
       - ./nas_search.py:/app/nas_search.py:ro
