@@ -6,7 +6,7 @@ public class SettingsTests
     public void Saves_and_loads()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString(), "settings.json");
-        var s = new Settings { Address = "192.168.1.10:8765", User = "me", ProtectedPassword = "x", Hotkey = "Ctrl+Shift+F", Exts = "pdf;docx", CertPin = "AB12" };
+        var s = new Settings { Address = "192.168.1.10:8765", User = "me", ProtectedPassword = "x", Hotkey = "Ctrl+Shift+F", Exts = "pdf;docx", CertPin = "AB12", SearchLocal = false };
         s.Save(path);
         Assert.Equal(s, Settings.Load(path));
         Assert.DoesNotContain("Server", File.ReadAllText(path).Replace("Address", ""));
@@ -17,6 +17,7 @@ public class SettingsTests
     {
         Assert.Equal(new Settings(), Settings.Load("/nonexistent/settings.json"));
         Assert.Equal("Ctrl+Alt+Space", new Settings().Hotkey);
+        Assert.True(new Settings().SearchNas && new Settings().SearchLocal);  // settings from older versions search both
     }
 
     [Fact]

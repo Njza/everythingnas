@@ -33,6 +33,8 @@ public partial class SettingsWindow : Window
         UserInput.Text = s.User;
         PassInput.Password = Secret.Unprotect(s.ProtectedPassword);
         AutoStartBox.IsChecked = AutoStart.Enabled;
+        SearchNasBox.IsChecked = s.SearchNas;
+        SearchLocalBox.IsChecked = s.SearchLocal;
         VersionText.Text = $"版本 {typeof(App).Assembly.GetName().Version?.ToString(3)}";
         Loaded += (_, _) => AddressInput.Focus();
         SourceInitialized += (_, _) => Theme.Frame(this);
@@ -47,10 +49,16 @@ public partial class SettingsWindow : Window
         User = UserInput.Text.Trim(),
         ProtectedPassword = Secret.Protect(PassInput.Password),
         Hotkey = HotkeyInput.Text,
+        SearchNas = SearchNasBox.IsChecked == true,
+        SearchLocal = SearchLocalBox.IsChecked == true,
     };
 
-    // Returns an error to show, or null when the address is usable; empty = this PC only
-    static string? Validate(Settings s) => s.Address != "" && s.Server is null ? "地址不对" : null;
+    // Returns an error to show, or null when the settings are usable; no address = this PC only
+    static string? Validate(Settings s) =>
+        s.Address != "" && s.Server is null ? "地址不对"
+        : !s.SearchNas && !s.SearchLocal ? "NAS 和本机硬盘至少勾一个"
+        : !s.SearchLocal && s.Server is null ? "只搜 NAS 要先填地址"
+        : null;
 
     void Save_Click(object sender, RoutedEventArgs e)
     {

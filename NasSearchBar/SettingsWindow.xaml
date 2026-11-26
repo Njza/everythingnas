@@ -108,6 +108,13 @@
         <TextBlock Style="{StaticResource Note}" Margin="56,8,0,0"
                    Text="填这个人的 NAS 账号，只搜得到它有权限的共享文件夹&#10;密码加密保存，只有当前 Windows 用户能读取" />
 
+        <TextBlock Text="搜索范围" Style="{StaticResource Heading}" Margin="0,24,0,12" />
+        <StackPanel Orientation="Horizontal">
+            <CheckBox x:Name="SearchNasBox" Content="NAS" />
+            <CheckBox x:Name="SearchLocalBox" Content="本机硬盘" Margin="24,0,0,0" />
+        </StackPanel>
+        <TextBlock Style="{StaticResource Note}" Text="两个都勾就都搜。只搜 NAS 时不用等本机建索引" />
+
         <TextBlock Text="快捷键" Style="{StaticResource Heading}" Margin="0,24,0,12" />
         <Grid>
             <Grid.ColumnDefinitions>

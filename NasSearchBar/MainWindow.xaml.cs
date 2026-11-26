@@ -24,8 +24,8 @@ public partial class MainWindow : Window
     readonly System.Windows.Forms.NotifyIcon tray;
     CancellationTokenSource? inflight;
     Settings settings = new();
-    NasClient? nas;  // null when no address is set: then only this PC is searched
-    // this PC's drives, always searched; scanned once at start, kept across settings changes
+    NasClient? nas;  // null when no address is set or the NAS is unticked in the settings
+    // this PC's drives, unless unticked in the settings; scanned once at start, kept across settings changes
     static readonly LocalIndex local = new(LocalIndex.FixedDrives(), TimeSpan.FromMinutes(30));
     SettingsWindow? settingsWindow;
     readonly Pins pins = new(Pins.FilePath);
@@ -86,7 +86,7 @@ public partial class MainWindow : Window
             settings = new();
             SetStatus("设置文件读不了，请重新设置", error: true);
         }
-        nas = settings.Server is { } server
+        nas = settings.SearchNas && settings.Server is { } server
             ? new NasClient(server, settings.User, Secret.Unprotect(settings.ProtectedPassword), settings.CertPin)
             : null;
         ShowFilter();
@@ -147,7 +147,7 @@ public partial class MainWindow : Window
         FilterPopup.IsOpen = true;
         FilterSearch.Focus();
         var nasExts = nas?.ExtsAsync(CancellationToken.None);
-        var mine = (await local.ExtsAsync(CancellationToken.None)).Exts;
+        var mine = settings.SearchLocal ? (await local.ExtsAsync(CancellationToken.None)).Exts : [];
         ExtCount[] theirs = [];
         string? note = null;
         if (nasExts is not null)
@@ -295,7 +295,7 @@ public partial class MainWindow : Window
 
     public void ShowBar()
     {
-        if (!local.Ready)  // the bar is usable once this PC's index is built; until then a dialog shows the progress
+        if (settings.SearchLocal && !local.Ready)  // the bar is usable once this PC's index is built; until then a dialog shows the progress
         {
             if (indexing is null)
             {
@@ -356,10 +356,10 @@ public partial class MainWindow : Window
         }
         q = settings.Filtered(q);
         var nasTask = nas?.SearchAsync(q, cts.Token);  // asked first, so it runs while this PC is searched
-        SearchResponse mine;
+        SearchResponse mine = new(0, 0, []);
         try
         {
-            mine = await local.SearchAsync(q, cts.Token);
+            if (settings.SearchLocal) mine = await local.SearchAsync(q, cts.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested) { return; }
         if (cts.IsCancellationRequested) return;  // a newer query already ran
@@ -367,7 +367,8 @@ public partial class MainWindow : Window
         // to the 5 s timeout). Not awaited here, so Enter opens what is listed now instead of waiting for the NAS.
         found = mine.Results;
         Render();
-        SetStatus($"{mine.Total:N0} 个结果" + (nasTask is null ? "" : " · 正在搜 NAS…"));
+        SetStatus(nasTask is null ? $"{mine.Total:N0} 个结果"
+            : settings.SearchLocal ? $"{mine.Total:N0} 个结果 · 正在搜 NAS…" : "正在搜 NAS…");
         if (nasTask is not null) _ = AddNasResults(nasTask, mine, cts);
     }
 

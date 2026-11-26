@@ -94,6 +94,8 @@ Tray icon → right-click → 设置; saved in `%APPDATA%\NasSearch\settings.jso
   the server uses.
 - **账号 / 密码**: the person's own NAS account (unless the server has `DSM_URL: ""`). Searches find only the
   shared folders it may open. The password is encrypted with Windows DPAPI.
+- **搜索范围**: NAS, 本机硬盘 or both (the default). Only NAS needs an address, and the bar then opens without
+  waiting for this PC's index.
 - **快捷键**: click the box and press the new combination (needs Ctrl, Alt or Win).
 - **开机自动启动**: a Task Scheduler task with the account's highest rights, so no UAC prompt at login.
 

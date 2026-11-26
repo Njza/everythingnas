@@ -16,6 +16,8 @@ public sealed record Settings
     public string Hotkey { get; init; } = "Ctrl+Alt+Space";  // WPF KeyGesture text
     public string Exts { get; init; } = "";  // "pdf;docx": search only these formats, as in ext:pdf;docx; "" = all
     public string CertPin { get; init; } = "";  // SHA-256 of the NAS's certificate, seen at the first connection
+    public bool SearchNas { get; init; } = true;  // the NAS is searched only when an address is set as well
+    public bool SearchLocal { get; init; } = true;  // this PC's drives
 
     // The query sent to the server: the formats ticked in the bar's filter narrow every search
     public string Filtered(string q) => Exts == "" ? q : $"{q} ext:{Exts}";
