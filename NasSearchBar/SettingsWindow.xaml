@@ -106,7 +106,7 @@
             <PasswordBox x:Name="PassInput" Grid.Row="1" Grid.Column="1" Margin="0,12,0,0" />
         </Grid>
         <TextBlock Style="{StaticResource Note}" Margin="56,8,0,0"
-                   Text="NAS 端设置了 AUTH 时才填&#10;密码加密保存，只有当前 Windows 用户能读取" />
+                   Text="填这个人的 NAS 账号，只搜得到它有权限的共享文件夹&#10;密码加密保存，只有当前 Windows 用户能读取" />
 
         <TextBlock Text="快捷键" Style="{StaticResource Heading}" Margin="0,24,0,12" />
         <Grid>

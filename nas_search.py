@@ -4,26 +4,34 @@ Scans ROOT every SCAN_MINUTES, keeps all names in memory and answers /search and
 Standard library only, so it runs in the stock python Docker image.
 """
 import base64
-import hmac
+import hashlib
 import json
 import os
 import re
+import ssl
 import threading
 import time
+import urllib.request
 from array import array
 from bisect import bisect_right
 from collections import Counter, namedtuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import accumulate, compress, count, filterfalse, repeat
 from operator import add, and_, contains, not_, or_
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 ROOT = os.environ.get('ROOT', '/data').rstrip('/')
 NAS = os.environ.get('NAS_NAME', 'NAS')
 SCAN_MINUTES = float(os.environ.get('SCAN_MINUTES', '30'))
 PORT = int(os.environ.get('PORT', '8765'))
-AUTH = os.environ.get('AUTH')  # "user:password" turns on HTTP basic auth
-AUTH = AUTH and 'Basic ' + base64.b64encode(AUTH.encode()).decode()
+# DSM on this NAS, as the container reaches it. Set: every search needs a NAS account (each person's own, as for
+# \\NAS) and finds only the shared folders DSM lets that account open. Unset: no login, everyone finds everything.
+DSM_URL = os.environ.get('DSM_URL', '').rstrip('/')
+LOGIN_MINUTES = 30  # a login is checked with DSM this often: a permission change in DSM counts within this time
+DSM_TIMEOUT = 4  # seconds per DSM call: under NasSearch.exe's 5 s, so the reason reaches it
+# DSM's own certificate, mounted read-only: the server then speaks HTTPS, so NAS passwords never cross the LAN in
+# plain text. Without it the server speaks HTTP, and refuses to start if DSM_URL asks for passwords.
+CERT_DIR = os.environ.get('CERT_DIR', '/cert')
 # Shared folders left out when a whole volume is mounted, comma-separated. homes holds every user's own folder,
 # whose file names others on the LAN should not see. "" indexes them all.
 SKIP_SHARES = {s.strip().lower() for s in os.environ.get('SKIP_SHARES', 'homes').split(',') if s.strip()}
@@ -32,7 +40,8 @@ LIMIT = 200
 # Entries sorted by lowercase name; parent indexes dirs (relative to ROOT, like "/video/Movies").
 # big is every lowercase name between \0 separators, starts[i] the offset of the \0 before entry i.
 # size (-1 for folders) and mtime come from the scan, so a search reads no disk.
-Index = namedtuple('Index', 'names lows parent isdir dirs big starts scanned size mtime')
+# cache holds what is worked out once per scan (per-user visibility, format counts) and goes with the index.
+Index = namedtuple('Index', 'names lows parent isdir dirs big starts scanned size mtime cache')
 
 
 def pack(names, parent, isdir, dirs, scanned, size=None, mtime=None):
@@ -47,7 +56,7 @@ def pack(names, parent, isdir, dirs, scanned, size=None, mtime=None):
     starts = array('q', accumulate(map(add, map(len, lows), repeat(1)), initial=0))
     return Index(names, lows, [parent[i] for i in order], bytearray(map(isdir.__getitem__, order)),
                  dirs, big, starts, scanned, array('q', map(size.__getitem__, order)),
-                 array('d', map(mtime.__getitem__, order)))
+                 array('d', map(mtime.__getitem__, order)), {})
 
 
 INDEX = pack([], [], bytearray(), [''], 0)
@@ -73,6 +82,12 @@ def unc_dir(rel):
     return '/' + rest if rest else ''  # the volume itself is the NAS root, like /data was
 
 
+def shown(name):
+    """A name as JSON readers take it: bytes that are not UTF-8 on disk (an old GBK zip, say) become U+FFFD.
+    The exe's JSON reader rejects the lone surrogates Python keeps for them, and with them the whole reply."""
+    return name.encode('utf-8', 'surrogateescape').decode('utf-8', 'replace')
+
+
 def build():
     # shortcut: full rescan, ~320 MB RAM per million entries (about double during a rescan); a file deleted since
     # the last scan stays listed until the next one. Upgrade to inotify + SQLite past a few million files.
@@ -82,7 +97,7 @@ def build():
     while todo:
         rel = todo.pop()
         here = len(dirs)
-        dirs.append(unc_dir(rel))  # only for showing and path terms: searches read no disk
+        dirs.append(shown(unc_dir(rel)))  # only for showing and path terms: searches read no disk
         try:
             entries = os.scandir(ROOT + rel)
         except OSError:  # gone or unreadable since its folder was listed
@@ -99,7 +114,7 @@ def build():
                 if folder and rel == '' and VOLUME.fullmatch(e.name):
                     todo.append('/' + e.name)  # a mounted volume: list its shares, but it is no entry itself
                     continue
-                names.append(e.name)
+                names.append(shown(e.name))
                 parent.append(here)
                 isdir.append(folder)
                 size.append(-1 if folder else st.st_size)
@@ -286,26 +301,188 @@ def path_contains(ix, cand, s, case):
     return map(or_, hit, map(and_, map(ends.__contains__, col(ix.parent, cand)), map(str.startswith, xs, repeat(tail))))
 
 
-def search(q):
+class Refused(Exception):
+    """A request that cannot search; code is the HTTP status to answer, the message says why for the person."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+class DsmError(Exception):
+    """DSM answered success: false, with this error code."""
+
+
+# DSM's login error codes (DSM Login Web API guide) -> what to answer
+LOGIN_ERRORS = {
+    400: (401, 'NAS 账号或密码不对'),
+    401: (403, '这个 NAS 账号已停用'),
+    402: (403, '这个 NAS 账号没有 File Station 权限（控制面板 → 用户账号 → 应用程序）'),
+    403: (403, '这个 NAS 账号开了两步验证，不能用来搜索'),
+    404: (403, '这个 NAS 账号开了两步验证，不能用来搜索'),
+    406: (403, '这个 NAS 账号开了两步验证，不能用来搜索'),
+    407: (502, '群晖封锁了搜索服务的 IP：控制面板 → 安全性 → 保护 → 允许/封锁列表 里解除'),
+    408: (403, '这个 NAS 账号的密码过期了，先在 DSM 里改密码'),
+    409: (403, '这个 NAS 账号的密码过期了，先在 DSM 里改密码'),
+    410: (403, '这个 NAS 账号要先在 DSM 里改密码'),
+    411: (403, '这个 NAS 账号被锁定了'),
+}
+# DSM's certificate is self-signed or made for another name, and this hop never leaves the NAS
+TLS = ssl.create_default_context()
+TLS.check_hostname = False
+TLS.verify_mode = ssl.CERT_NONE
+
+
+def dsm(api, method, version, **params):
+    """One DSM Web API call -> its data. DsmError when DSM says no, Refused(502) when it cannot be reached."""
+    body = urlencode({'api': api, 'method': method, 'version': version, **params}).encode()  # POST: no password in a URL
+    try:
+        with urllib.request.urlopen(DSM_URL + '/webapi/entry.cgi', body, timeout=DSM_TIMEOUT, context=TLS) as r:
+            reply = json.load(r)
+    except (OSError, ValueError) as e:  # refused, timed out, or a page that is no DSM reply
+        raise Refused(502, f'连不上群晖 DSM（{DSM_URL}）：{e}')
+    if not reply.get('success'):
+        raise DsmError((reply.get('error') or {}).get('code', 0))
+    return reply.get('data') or {}
+
+
+def dsm_shares(name, password):
+    """The shared folders DSM lets this account open, as File Station lists them. Refused when it cannot log in."""
+    try:
+        sid = dsm('SYNO.API.Auth', 'login', 6, account=name, passwd=password, session='FileStation',
+                  format='sid')['sid']
+    except DsmError as e:
+        raise Refused(*LOGIN_ERRORS.get(e.args[0], (502, f'群晖登录出错，错误码 {e.args[0]}')))
+    try:
+        return [s['name'] for s in dsm('SYNO.FileStation.List', 'list_share', 2, _sid=sid)['shares']]
+    except DsmError as e:
+        raise Refused(*LOGIN_ERRORS[402] if e.args[0] == 105 else (502, f'群晖列共享文件夹出错，错误码 {e.args[0]}'))
+    finally:
+        try:
+            dsm('SYNO.API.Auth', 'logout', 6, session='FileStation', _sid=sid)
+        except (DsmError, Refused):
+            pass  # DSM ends the session itself later
+
+
+def credentials(header):
+    """An Authorization: Basic header -> (name, password); ('', '') when it is missing or broken."""
+    try:
+        name, _, password = base64.b64decode(header.removeprefix('Basic ')).decode().partition(':')
+    except ValueError:  # not base64 or not UTF-8
+        return '', ''
+    return name, password
+
+
+# Ages use time.monotonic(): a clock set back by NTP must not stretch how long a login is trusted
+_checked = {}  # sha256 of an Authorization header -> (when DSM was asked, the shares it allows or (code, why) refused)
+_failed = {}  # client IP -> when its recent logins were refused
+_dsm_down = (float('-inf'), None)  # when DSM last could not be reached, and (code, why)
+_dsm_lock = threading.Lock()
+
+
+def login(header, ip):
+    """The lowercase shared folders this request may search, None for all of them (DSM_URL unset); else Refused.
+    A login is checked with DSM once per LOGIN_MINUTES, not once per keystroke."""
+    global _dsm_down
+    if not DSM_URL:
+        return None
+    name, password = credentials(header)
+    if not name:
+        raise Refused(401, '要用 NAS 账号登录')
+    key = hashlib.sha256(header.encode()).digest()
+    hit = _checked.get(key)
+    if not hit or time.monotonic() - hit[0] > LOGIN_MINUTES * 60:
+        with _dsm_lock:  # one DSM login at a time: keystrokes with a new password ask DSM once, not once each
+            now = time.monotonic()
+            hit = _checked.get(key)
+            if not hit or now - hit[0] > LOGIN_MINUTES * 60:
+                if now - _dsm_down[0] < 30:  # DSM just failed to answer: say so now, not after another timeout each
+                    raise Refused(*_dsm_down[1])
+                # DSM sees every login as coming from this container, and its auto block (10 fails in 5 minutes
+                # by default) would then lock everyone out: stop one client well before that
+                fails = _failed[ip] = [t for t in _failed.get(ip, []) if now - t < 300]
+                if len(fails) >= 5:
+                    raise Refused(429, '登录失败太多次，5 分钟后再试')
+                try:
+                    got = frozenset(s.lower() for s in dsm_shares(name, password))
+                except Refused as e:
+                    got = (e.code, str(e))  # not e: re-raising one exception grows its traceback, which holds the password
+                    if e.code == 502:  # DSM unreachable: no fault of this login, so not remembered for it
+                        _dsm_down = (now, got)
+                        raise
+                    fails.append(now)
+                for k in [k for k, (t, _) in _checked.items() if now - t > LOGIN_MINUTES * 60]:
+                    del _checked[k]
+                hit = _checked[key] = (now, got)
+    if isinstance(hit[1], tuple):
+        raise Refused(*hit[1])
+    return hit[1]
+
+
+def tops(ix):
+    """Each folder's shared folder, the first part of its path; '' for the NAS root."""
+    if 'tops' not in ix.cache:
+        ix.cache['tops'] = [d[1:].partition('/')[0] for d in ix.dirs]
+    return ix.cache['tops']
+
+
+def visible(ix, only):
+    """One byte per entry, 1 where it lies in one of the shared folders in only; None when only is None."""
+    # shortcut: whole shared folders only; a subfolder that DSM denies someone inside a share they may read still
+    # shows its file names to them (they cannot open the files). Ask DSM per folder if subfolder permissions are used.
+    if only is None:
+        return None
+    if only not in ix.cache:
+        top = [t.lower() for t in tops(ix)]
+        ok = set(compress(count(), map(only.__contains__, top)))
+        vis = bytearray(map(ok.__contains__, ix.parent))
+        root = set(compress(count(), map(not_, top)))
+        for i in compress(count(), map(root.__contains__, ix.parent)):
+            vis[i] = ix.lows[i] in only  # a shared folder itself, at the NAS root
+        ix.cache[only] = vis
+    return ix.cache[only]
+
+
+def found(ix, only):
+    """How many entries a search in the shared folders in only can find."""
+    vis = visible(ix, only)
+    return len(ix.names) if vis is None else vis.count(1)
+
+
+def search(q, only=None):
+    """Entries matching q, in the shared folders in only (None: all of them)."""
     ix = INDEX  # one snapshot: the scan thread swaps INDEX while searches run
     hits = match(parse(q), ix, range(len(ix.names)))
+    vis = visible(ix, only)
+    if vis is not None:  # after the search, not before: the str.find fast path needs every entry as candidates
+        hits = list(compress(hits, map(vis.__getitem__, hits)))
     out = [{'name': ix.names[i], 'path': '\\\\' + NAS + ix.dirs[ix.parent[i]].replace('/', '\\'),
             'size': None if ix.size[i] < 0 else ix.size[i], 'mtime': ix.mtime[i]} for i in hits[:LIMIT]]
-    return {'total': len(hits), 'indexed': len(ix.names), 'scanned': ix.scanned, 'results': out}
+    return {'total': len(hits), 'indexed': found(ix, only), 'scanned': ix.scanned, 'results': out}
 
 
 EXT_OK = re.compile(r'[^\s|<>";]+')  # usable inside an ext:a;b term
-_exts = (None, [])  # (index, its counts): one count per scan, not per request
 
 
-def exts():
-    """Every file extension in the index, most files first, as {ext, count}, lowercase like ext: matches."""
-    global _exts
+def exts(only=None):
+    """Every file extension in the shared folders in only, most files first, as {ext, count}, lowercase like ext:
+    matches."""
     ix = INDEX
-    if _exts[0] is not ix:
-        n = Counter(low.rpartition('.')[2] for low, d in zip(ix.lows, ix.isdir) if not d and '.' in low)
-        _exts = (ix, [{'ext': e, 'count': c} for e, c in n.most_common() if EXT_OK.fullmatch(e)])
-    return {'exts': _exts[1]}
+    key = ('exts', only)
+    if key not in ix.cache:  # one count per scan, not per request
+        vis = visible(ix, only)
+        keep = zip(ix.lows, ix.isdir, repeat(1) if vis is None else vis)
+        n = Counter(low.rpartition('.')[2] for low, d, v in keep if v and not d and '.' in low)
+        ix.cache[key] = [{'ext': e, 'count': c} for e, c in n.most_common() if EXT_OK.fullmatch(e)]
+    return {'exts': ix.cache[key]}
+
+
+def me(name, only):
+    """For the web page: who is logged in, the shared folders they search, how much that is."""
+    ix = INDEX
+    shares = None if only is None else sorted((t for t in set(tops(ix)) if t and t.lower() in only), key=str.lower)
+    return {'name': name, 'shares': shares, 'indexed': found(ix, only), 'total': len(ix.names),
+            'scanned': ix.scanned}
 
 
 def scan_forever():
@@ -313,41 +490,147 @@ def scan_forever():
     while True:
         t = time.time()
         INDEX = build()
-        exts()  # count the formats now, so the first format list after a scan does not wait for it
+        for only in {got for _, got in list(_checked.values()) if isinstance(got, frozenset)} or {None}:
+            exts(only)  # count the formats now, so the first format list after a scan does not wait for it
         print(f'indexed {len(INDEX[0])} entries in {time.time() - t:.1f}s', flush=True)
         time.sleep(SCAN_MINUTES * 60)
+
+
+# The web page at /: search as the logged-in NAS account sees it, to check logins and permissions from a browser.
+# Every name from the server goes in with textContent, never innerHTML: file names may hold < and &.
+PAGE = r'''<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>NAS 搜索</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f3f4f6; --panel: #fff; --text: #1b2130; --muted: #5c6577; --line: #dcdfe5; --bad: #b3261e;
+  font: 15px/1.55 system-ui, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #13161b; --panel: #1b1f26; --text: #e5e8ee; --muted: #98a1b0; --line: #2d333d; --bad: #ff8b80; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+main { max-width: 980px; margin: 0 auto; padding: 28px 16px 64px; }
+h1 { font-size: 21px; margin: 0; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-top: 16px; }
+.note { margin: 6px 0 0; color: var(--muted); }
+.note.error { color: var(--bad); }
+input { font: inherit; color: inherit; width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; margin-top: 12px; }
+.table-wrapper { overflow: auto; max-block-size: min(560px, 70vh); border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; }
+table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+thead th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
+tbody th { font-weight: normal; }
+.path { color: var(--muted); max-width: 26em; overflow: hidden; text-overflow: ellipsis; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>NAS 搜索</h1>
+  <p id="who" class="note">读取中…</p>
+  <section aria-labelledby="results-h">
+    <p id="results-h" class="note">和电脑上的搜索框搜到的一样。换账号：关掉浏览器重开，或用无痕窗口。</p>
+    <input id="q" type="search" placeholder="和搜索框的写法一样，空着列出全部" aria-label="搜索" autofocus>
+    <p id="summary" class="note"></p>
+    <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="results-h">
+      <table>
+        <thead><tr><th scope="col">名称</th><th scope="col">位置</th><th scope="col" class="num">大小</th><th scope="col">修改日期</th></tr></thead>
+        <tbody id="hits"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const num = n => n.toLocaleString('zh-CN');
+const el = (tag, props, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+
+async function get(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(await r.text() || `出错了（HTTP ${r.status}）`);
+  return r.json();
+}
+
+function say(node, text, error = false) {
+  node.textContent = text;
+  node.classList.toggle('error', error);
+}
+
+let timer, seq = 0;
+function find() {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    const my = ++seq;  // only the newest search may fill the table
+    try {
+      const r = await get('/search?' + new URLSearchParams({q: $('#q').value}));
+      if (my !== seq) return;
+      say($('#summary'), `${num(r.total)} 个结果` + (r.total > r.results.length ? `，列出前 ${r.results.length} 个` : ''));
+      $('#hits').replaceChildren(...r.results.map(h => el('tr', {},
+        el('th', {scope: 'row', textContent: h.name}),
+        el('td', {className: 'path', textContent: h.path, title: h.path}),
+        el('td', {className: 'num', textContent: size(h.size)}),
+        el('td', {textContent: new Date(h.mtime * 1000).toLocaleString('zh-CN')}))));
+    } catch (err) {
+      if (my === seq) say($('#summary'), err.message, true);
+    }
+  }, 150);
+}
+
+function size(b) {
+  if (b == null) return '文件夹';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  for (; b >= 1024 && i < units.length - 1; i++) b /= 1024;
+  return (i ? b.toFixed(1) : b) + ' ' + units[i];
+}
+
+$('#q').addEventListener('input', find);
+get('/me').then(m => {
+  const scan = m.scanned ? `，${new Date(m.scanned * 1000).toLocaleString('zh-CN')} 扫描` : '，第一次扫描进行中';
+  say($('#who'), m.shares === null
+    ? `不用登录：谁都能搜到全部 ${num(m.total)} 项${scan}。`
+    : `以 NAS 账号 ${m.name} 登录，能搜 ${m.shares.join('、') || '（没有共享文件夹）'}，共 ${num(m.indexed)} 项（全部 ${num(m.total)} 项${scan}）。`);
+  find();
+}, err => say($('#who'), err.message, true));
+</script>
+</body>
+</html>
+'''
 
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'  # keep-alive: a search reuses the connection instead of opening one per keystroke
 
     def do_GET(self):
-        if AUTH and not hmac.compare_digest(self.headers.get('Authorization', ''), AUTH):
-            self.send_response(401)
-            self.send_header('WWW-Authenticate', 'Basic realm="nas-search"')
-            self.send_header('Content-Length', '0')  # HTTP/1.1: without it the client waits for a body
-            self.end_headers()
-            return
         u = urlsplit(self.path)
-        if u.path == '/search':
-            body = json.dumps(search(parse_qs(u.query).get('q', [''])[0])).encode()
-            ctype = 'application/json'
-        elif u.path == '/exts':
-            body = json.dumps(exts()).encode()
-            ctype = 'application/json'
-        elif u.path == '/':  # no search page: NasSearch.exe is the client; this line shows the server is up
-            ix = INDEX
-            state = f'{len(ix.names)} entries indexed' if ix.scanned else 'first scan running'
-            body = f'nas-search: {state}. Search with NasSearch.exe.\n'.encode()
-            ctype = 'text/plain; charset=utf-8'
-        else:
-            self.send_response(404)
-            self.send_header('Content-Length', '0')
-            self.end_headers()
-            return
-        self.send_response(200)
+        if u.path not in ('/', '/search', '/exts', '/me'):
+            return self.reply(404)
+        auth = self.headers.get('Authorization', '')
+        try:
+            only = login(auth, self.client_address[0])
+        except Refused as e:
+            return self.reply(e.code, str(e), 'text/plain; charset=utf-8')
+        if u.path == '/':
+            return self.reply(200, PAGE, 'text/html; charset=utf-8')
+        q = parse_qs(u.query).get('q', [''])[0]
+        data = (search(q, only) if u.path == '/search' else exts(only) if u.path == '/exts'
+                else me(credentials(auth)[0], only))
+        self.reply(200, json.dumps(data))
+
+    def reply(self, code, body='', ctype='application/json'):
+        body = body.encode()
+        self.send_response(code)
+        if code == 401:  # charset: browsers then send a Chinese name or password as UTF-8, like NasSearch.exe
+            self.send_header('WWW-Authenticate', 'Basic realm="NAS", charset="UTF-8"')
         self.send_header('Content-Type', ctype)
-        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Content-Length', str(len(body)))  # HTTP/1.1: without it the client waits for a body
         self.end_headers()
         self.wfile.write(body)
 
@@ -355,7 +638,26 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def make_server(port):
+    """The server, on HTTPS with DSM's certificate when it is mounted; DSM logins never go without it."""
+    server = ThreadingHTTPServer(('', port), Handler)
+    chain = next((f'{CERT_DIR}/{f}' for f in ('fullchain.pem', 'cert.pem') if os.path.exists(f'{CERT_DIR}/{f}')), None)
+    if chain:
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(chain, f'{CERT_DIR}/privkey.pem')
+        # handshake in each request's thread, not in accept(): one client that never speaks would block all others
+        server.socket = tls.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
+    elif DSM_URL:
+        server.server_close()
+        raise SystemExit(f'DSM_URL is set but there is no certificate in {CERT_DIR}: NAS passwords would cross the '
+                         'LAN in plain text. Mount DSM\'s certificate there (see docker-compose.yml).')
+    return server
+
+
 if __name__ == '__main__':
+    server = make_server(PORT)
     threading.Thread(target=scan_forever, daemon=True).start()
-    print(f'serving http://0.0.0.0:{PORT}  root={ROOT}', flush=True)
-    ThreadingHTTPServer(('', PORT), Handler).serve_forever()
+    scheme = 'https' if isinstance(server.socket, ssl.SSLSocket) else 'http'
+    logins = f'NAS account logins via {DSM_URL}' if DSM_URL else 'no logins (DSM_URL unset)'
+    print(f'serving {scheme}://0.0.0.0:{PORT}  root={ROOT}  {logins}', flush=True)
+    server.serve_forever()

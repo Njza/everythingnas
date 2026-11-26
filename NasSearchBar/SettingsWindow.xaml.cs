@@ -11,6 +11,7 @@ namespace NasSearchBar;
 public partial class SettingsWindow : Window
 {
     readonly Func<KeyGesture, bool> trySetHotkey;
+    (string Address, string Pin)? tested;  // the address the last 测试连接 reached, and the certificate it saw there
 
     public Settings Result { get; private set; }
 
@@ -40,6 +41,9 @@ public partial class SettingsWindow : Window
     Settings Read() => Result with  // keeps what this window does not edit, like the format filter
     {
         Address = AddressInput.Text.Trim(),
+        // 测试连接 trusts the certificate it sees; another address is another NAS, whose certificate is not known yet
+        CertPin = AddressInput.Text.Trim() is var a && tested?.Address == a ? tested.Value.Pin
+            : a == Result.Address ? Result.CertPin : "",
         User = UserInput.Text.Trim(),
         ProtectedPassword = Secret.Protect(PassInput.Password),
         Hotkey = HotkeyInput.Text,
@@ -117,7 +121,9 @@ public partial class SettingsWindow : Window
         Say("正在连接…", error: false);
         try
         {
-            var r = await new NasClient(s.Server!, s.User, PassInput.Password).SearchAsync("", CancellationToken.None);
+            var nas = new NasClient(s.Server!, s.User, PassInput.Password);  // no pin: a test trusts what it sees
+            var r = await nas.SearchAsync("", CancellationToken.None);
+            tested = (s.Address, nas.Pin);
             Say($"可用，{r.Indexed:N0} 个文件", error: false);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)

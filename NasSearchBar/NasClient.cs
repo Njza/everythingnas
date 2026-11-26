@@ -1,17 +1,40 @@
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 
 namespace NasSearchBar;
 
-// Talks to nas_search.py's /search endpoint
-public sealed class NasClient(Uri server, string user, string password)
+// Talks to nas_search.py's /search endpoint. pin: the NAS certificate's SHA-256 from an earlier connection, or "".
+public sealed class NasClient(Uri server, string user, string password, string pin = "")
 {
-    static readonly HttpClient Http = new(new SocketsHttpHandler { ConnectCallback = ConnectIPv4First })
+    // The NAS serves DSM's own certificate, which is self-signed: the first one seen is trusted from then on and no
+    // other one, so nobody in between can read the password. A certificate Windows trusts (a real one for the NAS's
+    // name) is fine as it is.
+    public string Pin { get; private set; } = pin;
+    public bool CertChanged { get; private set; }  // the NAS showed another certificate than Pin: refused
+
+    bool Trust(object _, X509Certificate? cert, X509Chain? __, SslPolicyErrors errors)
+    {
+        if (errors == SslPolicyErrors.None) return true;
+        var seen = cert?.GetCertHashString(HashAlgorithmName.SHA256);
+        if (Pin == "" && seen is not null) Pin = seen;
+        CertChanged = seen != Pin;
+        return !CertChanged;
+    }
+
+    HttpClient? http;  // one per client: its certificate check needs this client's Pin
+    HttpClient Http => http ??= new(new SocketsHttpHandler
+    {
+        ConnectCallback = ConnectIPv4First,
+        SslOptions = { RemoteCertificateValidationCallback = Trust },
+    })
     {
         Timeout = TimeSpan.FromSeconds(5),
     };

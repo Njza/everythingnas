@@ -1,5 +1,8 @@
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using NasSearchBar;
 
@@ -100,6 +103,55 @@ public class NasClientTests
         using var nas = new FakeServer(401, "");
         var e = await Assert.ThrowsAsync<HttpRequestException>(() => new NasClient(nas.Url, "me", "bad").SearchAsync("a", CancellationToken.None));
         Assert.Equal(HttpStatusCode.Unauthorized, e.StatusCode);
+    }
+
+    // nas_search.py on HTTPS with a self-signed certificate, like DSM's: answers every connection with Json
+    static (Uri Url, string Pin) FakeHttpsServer()
+    {
+        using var key = RSA.Create(2048);
+        using var made = new CertificateRequest("CN=nas", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
+        var cert = X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pfx), null);  // Windows needs a stored key
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                using var c = await l.AcceptTcpClientAsync();
+                try
+                {
+                    using var tls = new SslStream(c.GetStream());
+                    await tls.AuthenticateAsServerAsync(cert);
+                    await tls.ReadAsync(new byte[4096]);
+                    var body = Encoding.UTF8.GetBytes(Json);
+                    await tls.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\n\r\n"));
+                    await tls.WriteAsync(body);
+                }
+                catch (Exception e) when (e is IOException or System.Security.Authentication.AuthenticationException) { }  // a refused client
+            }
+        });
+        return (new Uri($"https://127.0.0.1:{((IPEndPoint)l.LocalEndpoint).Port}/"), cert.GetCertHashString(HashAlgorithmName.SHA256));
+    }
+
+    [Fact]
+    public async Task First_connection_pins_the_nas_certificate()
+    {
+        var (url, pin) = FakeHttpsServer();
+        var nas = new NasClient(url, "me", "pw");
+        Assert.Equal("a.docx", (await nas.SearchAsync("a", CancellationToken.None)).Results[0].Name);
+        Assert.Equal(pin, nas.Pin);
+        Assert.False(nas.CertChanged);
+        await new NasClient(url, "me", "pw", pin).SearchAsync("a", CancellationToken.None);  // the same one: fine
+    }
+
+    [Fact]
+    public async Task Another_certificate_is_refused()
+    {
+        var (url, _) = FakeHttpsServer();
+        var nas = new NasClient(url, "me", "pw", "00" + new string('A', 62));  // pinned to some other NAS
+        await Assert.ThrowsAsync<HttpRequestException>(() => nas.SearchAsync("a", CancellationToken.None));
+        Assert.True(nas.CertChanged);
     }
 
     [Fact]

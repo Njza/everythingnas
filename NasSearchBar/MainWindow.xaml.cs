@@ -87,7 +87,7 @@ public partial class MainWindow : Window
             SetStatus("设置文件读不了，请重新设置", error: true);
         }
         nas = settings.Server is { } server
-            ? new NasClient(server, settings.User, Secret.Unprotect(settings.ProtectedPassword))
+            ? new NasClient(server, settings.User, Secret.Unprotect(settings.ProtectedPassword), settings.CertPin)
             : null;
         ShowFilter();
     }
@@ -379,7 +379,9 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) when (cts.IsCancellationRequested) { return; }
         catch (Exception e) when (e is HttpRequestException or JsonException or OperationCanceledException)
         {
-            nasError = e is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } ? "NAS 账号或密码不对" : $"连不上 NAS {settings.Address}";
+            nasError = e is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } ? "NAS 账号或密码不对"
+                : nas?.CertChanged == true ? "NAS 的证书变了：确认是这台 NAS 后，在设置里点测试连接再保存"
+                : $"连不上 NAS {settings.Address}";
         }
         if (cts.IsCancellationRequested) return;  // a newer query already ran
         if (theirs is not null)
@@ -388,6 +390,12 @@ public partial class MainWindow : Window
                 .OrderBy(h => h.Name.ToLowerInvariant(), StringComparer.Ordinal)  // both lists come in name order
                 .ToArray();
             Render(Results.SelectedItem as Hit);  // the selected row stays selected as the NAS's rows slot in
+            if (settings.CertPin == "" && nas?.Pin is { Length: > 0 } pin)  // saved without 测试连接: keep the first one
+            {
+                settings = settings with { CertPin = pin };
+                try { settings.Save(Settings.FilePath); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }  // trusted for this run only
+            }
         }
         SetStatus($"{mine.Total + (theirs?.Total ?? 0):N0} 个结果" + (nasError is null ? "" : "，" + nasError), error: nasError is not null);
     }

@@ -22,9 +22,23 @@ come in one list and open straight in their default app.
    `main` into `/volume1/docker/nas-search/`.
 2. Container Manager → Project → Create → that folder → use the existing `docker-compose.yml` → Done.
    It needs no edits: it searches every shared folder on `/volume1`, whose top folders become `\\NAS\share` paths.
-   Uncomment the `/volume2` line if that volume exists, set `AUTH` to require a login, or list single shares instead.
-3. Open `http://<nas-ip>:8765` to check it runs: one line with the number of indexed entries, or
-   "first scan running" (~1M files take a few minutes).
+   Uncomment the `/volume2` line if that volume exists, or list single shares instead.
+3. Open `https://<nas-ip>:8765` (the browser warns about DSM's self-signed certificate: go on) and log in with a
+   NAS account: a search page shows who you are, the shared folders you can search and how many entries ("first
+   scan running" at first: ~1M files take a few minutes).
+
+**Logins**: everyone logs in with their own NAS (DSM) account, the one they use for `\\NAS`, and finds only the
+shared folders DSM lets that account open. The server asks DSM (`DSM_URL`, the NAS itself via
+`host.docker.internal`) with File Station's share list, once per account every 30 minutes, so a permission change
+in DSM counts within that time. Accounts with 2-step verification cannot log in; accounts need the File Station
+app permission (on by default). After 5 refused logins in 5 minutes a PC must wait, before DSM's own auto block
+locks the container out. Permissions count per shared folder: a subfolder DSM denies someone inside a share they
+may read still shows its file names to them. `DSM_URL: ""` turns logins off: everyone finds every file.
+
+**HTTPS**: the server speaks HTTPS with DSM's own certificate (mounted from
+`/usr/syno/etc/certificate/system/default`), so NAS passwords never cross the LAN in plain text; with `DSM_URL` set
+and no certificate it refuses to start. The search bar trusts the certificate it sees at the first connection and
+then only that one.
 
 **Windows PC**:
 
@@ -73,9 +87,12 @@ Not supported yet: `size:`, `dm:` and Everything's other functions.
 
 Tray icon → right-click → 设置; saved in `%APPDATA%\NasSearch\settings.json`.
 
-- **地址**: the NAS's LAN `host:port` (plain http, LAN only by design). Files open by this host,
-  `\\192.168.1.10\share\folder\file`, whatever `NAS_NAME` the server uses.
-- **账号 / 密码**: only when the server sets `AUTH`. The password is encrypted with Windows DPAPI.
+- **地址**: the NAS's LAN `host:port`, over https unless written `http://...` (a server without a certificate).
+  测试连接 trusts the certificate it sees; from then on only that one. If DSM's certificate changes, the bar says so:
+  press 测试连接 again and save. Files open by this host, `\\192.168.1.10\share\folder\file`, whatever `NAS_NAME`
+  the server uses.
+- **账号 / 密码**: the person's own NAS account (unless the server has `DSM_URL: ""`). Searches find only the
+  shared folders it may open. The password is encrypted with Windows DPAPI.
 - **快捷键**: click the box and press the new combination (needs Ctrl, Alt or Win).
 - **开机自动启动**: a Task Scheduler task with the account's highest rights, so no UAC prompt at login.
 
@@ -91,7 +108,8 @@ The search bar checks [the latest release](https://github.com/Njza/everythingnas
 12 hours. A newer `NasSearch.exe` is downloaded, checked against GitHub's SHA-256 digest and put in place of the
 running one (which Windows allows to be renamed); it runs from the next start, or at once from the tray menu's
 重启以更新. Pre-releases are skipped. The NAS side is not part of releases: take `nas_search.py` from `main`,
-replace it on the NAS and restart the project.
+replace it on the NAS and restart the project. A server on HTTPS needs a search bar from v1.2.0 on: release that
+first.
 
 ## Releasing
 
@@ -130,5 +148,5 @@ docker run --rm -v "$PWD":/w -v nas-search-nuget:/root/.nuget/packages -w /w/Nas
 - RAM: about 320 MB per million entries on the NAS (double during a rescan), about 380 MB for C: with 1.1M on the PC.
 - A NAS file deleted since the last scan stays listed until the next one (`SCAN_MINUTES`, 30 by default); each scan
   wakes the disks.
-- Plain HTTP, meant for the LAN: do not port-forward it to the internet. Everyone who can reach port 8765 can search
-  the file names; set `AUTH` if that is not fine.
+- Meant for the LAN: do not port-forward it to the internet. Everyone who can reach port 8765 can search the file
+  names if `DSM_URL` is `""`.

@@ -15,19 +15,20 @@ public sealed record Settings
     public string ProtectedPassword { get; init; } = "";  // DPAPI-encrypted by the app, never plain text on disk
     public string Hotkey { get; init; } = "Ctrl+Alt+Space";  // WPF KeyGesture text
     public string Exts { get; init; } = "";  // "pdf;docx": search only these formats, as in ext:pdf;docx; "" = all
+    public string CertPin { get; init; } = "";  // SHA-256 of the NAS's certificate, seen at the first connection
 
     // The query sent to the server: the formats ticked in the bar's filter narrow every search
     public string Filtered(string q) => Exts == "" ? q : $"{q} ext:{Exts}";
 
-    // shortcut: plain http, LAN only; add https and a second address if this ever has to work away from home
+    // https unless the address says http://: the NAS account's password must not cross the LAN in plain text
     [JsonIgnore]
     public Uri? Server
     {
         get
         {
-            var host = Address.Trim();
-            if (host.Contains("://")) host = host[(host.IndexOf("://") + 3)..];  // tolerate a pasted http://
-            return host != "" && Uri.TryCreate("http://" + host, UriKind.Absolute, out var u) && u.Host != "" ? u : null;
+            var a = Address.Trim();
+            return a != "" && Uri.TryCreate(a.Contains("://") ? a : "https://" + a, UriKind.Absolute, out var u)
+                   && u.Host != "" && u.Scheme is "https" or "http" ? u : null;
         }
     }
 
