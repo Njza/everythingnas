@@ -12,7 +12,8 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway   # the NAS itself, as seen from inside the container
     volumes:
-      - ./nas_search.py:/app/nas_search.py:ro
+      # This folder, writable: the web page's 更新并重启 replaces nas_search.py in it
+      - .:/app
       # DSM's own certificate: the server speaks HTTPS with it, so NAS passwords never cross the LAN in plain text.
       # Without it the server refuses NAS logins (DSM_URL); with DSM_URL "" it then speaks plain HTTP.
       - /usr/syno/etc/certificate/system/default:/cert:ro

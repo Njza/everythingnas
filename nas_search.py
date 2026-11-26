@@ -9,6 +9,7 @@ import json
 import os
 import re
 import ssl
+import sys
 import threading
 import time
 import urllib.request
@@ -20,6 +21,7 @@ from itertools import accumulate, compress, count, filterfalse, repeat
 from operator import add, and_, contains, not_, or_
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+VERSION = '1.0.0'  # raise it when this file changes: the web page shows it, so you can see which one the NAS runs
 ROOT = os.environ.get('ROOT', '/data').rstrip('/')
 NAS = os.environ.get('NAS_NAME', 'NAS')
 SCAN_MINUTES = float(os.environ.get('SCAN_MINUTES', '30'))
@@ -482,7 +484,55 @@ def me(name, only):
     ix = INDEX
     shares = None if only is None else sorted((t for t in set(tops(ix)) if t and t.lower() in only), key=str.lower)
     return {'name': name, 'shares': shares, 'indexed': found(ix, only), 'total': len(ix.names),
-            'scanned': ix.scanned}
+            'scanned': ix.scanned, 'every': SCAN_MINUTES, 'version': VERSION}
+
+
+# Updates from the web page, like NasSearch.exe's own: main's nas_search.py, replacing this file and restarting.
+# Anyone who may search may start one; it only ever installs a newer VERSION from this repo.
+UPDATE_URL = 'https://raw.githubusercontent.com/Njza/everythingnas/main/nas_search.py'
+SELF = os.path.abspath(__file__)  # docker-compose.yml mounts its folder writable, so it can be replaced
+_update_lock = threading.Lock()
+
+
+def newer(v):
+    """Whether version v, like '1.2.0', comes after this file's VERSION."""
+    return tuple(map(int, v.split('.'))) > tuple(map(int, VERSION.split('.')))
+
+
+def latest():
+    """main's nas_search.py -> (its VERSION, its text); ValueError or SyntaxError when it would not run."""
+    with urllib.request.urlopen(UPDATE_URL, timeout=10) as r:  # default context: GitHub's certificate is checked
+        src = r.read().decode()
+    m = re.search(r"^VERSION = '(\d+(?:\.\d+)*)'", src, re.M)
+    if not m:
+        raise ValueError('no VERSION in it')
+    compile(src, 'nas_search.py', 'exec')  # a file that would not even start is never installed
+    return m[1], src
+
+
+def update():
+    """Installs main's nas_search.py when it is newer and restarts into it a second later.
+    Returns the version it installs; None when this one is the newest."""
+    with _update_lock:  # one install at a time
+        try:
+            version, src = latest()
+        except (OSError, ValueError, SyntaxError) as e:
+            raise Refused(502, f'取不到 GitHub 上的新版本：{e}')
+        if not newer(version):
+            return None
+        try:
+            with open(SELF + '.new', 'w', encoding='utf-8') as f:
+                f.write(src)
+            os.replace(SELF + '.new', SELF)  # the whole new file or the old one, never half of it
+        except OSError as e:
+            raise Refused(500, f'写不了 {SELF}：{e.strerror}。docker-compose.yml 里要用 - .:/app 挂载整个文件夹')
+    threading.Timer(1, restart).start()  # once this request's reply is out
+    return version
+
+
+def restart():
+    print('restarting into the new nas_search.py', flush=True)
+    os.execv(sys.executable, sys.orig_argv)  # the same command, new code; the index is built again
 
 
 def scan_forever():
@@ -518,6 +568,8 @@ PAGE = r'''<!doctype html>
 body { margin: 0; background: var(--bg); color: var(--text); }
 main { max-width: 980px; margin: 0 auto; padding: 28px 16px 64px; }
 h1 { font-size: 21px; margin: 0; }
+h1 small { font-size: 13px; font-weight: normal; color: var(--muted); }
+button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 12px; margin-left: 8px; cursor: pointer; }
 section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-top: 16px; }
 .note { margin: 6px 0 0; color: var(--muted); }
 .note.error { color: var(--bad); }
@@ -533,8 +585,10 @@ tbody th { font-weight: normal; }
 </head>
 <body>
 <main>
-  <h1>NAS 搜索</h1>
+  <h1>NAS 搜索 <small>NAS 端 v__VERSION__</small></h1>
+  <p id="update" class="note"></p>
   <p id="who" class="note">读取中…</p>
+  <p id="scan" class="note"></p>
   <section aria-labelledby="results-h">
     <p id="results-h" class="note">和电脑上的搜索框搜到的一样。换账号：关掉浏览器重开，或用无痕窗口。</p>
     <input id="q" type="search" placeholder="和搜索框的写法一样，空着列出全部" aria-label="搜索" autofocus>
@@ -592,17 +646,42 @@ function size(b) {
 }
 
 $('#q').addEventListener('input', find);
+const time = s => new Date(s * 1000).toLocaleString('zh-CN');
 get('/me').then(m => {
-  const scan = m.scanned ? `，${new Date(m.scanned * 1000).toLocaleString('zh-CN')} 扫描` : '，第一次扫描进行中';
   say($('#who'), m.shares === null
-    ? `不用登录：谁都能搜到全部 ${num(m.total)} 项${scan}。`
-    : `以 NAS 账号 ${m.name} 登录，能搜 ${m.shares.join('、') || '（没有共享文件夹）'}，共 ${num(m.indexed)} 项（全部 ${num(m.total)} 项${scan}）。`);
+    ? `不用登录：谁都能搜到全部 ${num(m.total)} 项。`
+    : `以 NAS 账号 ${m.name} 登录，能搜 ${m.shares.join('、') || '（没有共享文件夹）'}，共 ${num(m.indexed)} 项（全部 ${num(m.total)} 项）。`);
+  say($('#scan'), m.scanned  // a scan starts this many minutes after the last one ended
+    ? `索引更新于 ${time(m.scanned)}，每 ${m.every} 分钟更新一次，下次约 ${time(m.scanned + m.every * 60)} 开始。`
+    : '第一次扫描进行中，稍后刷新。');
   find();
 }, err => say($('#who'), err.message, true));
+
+get('/update').then(u => {
+  if (!u.newer) return say($('#update'), `已是最新版本（GitHub 上是 v${u.latest}）。`);
+  say($('#update'), `有新版本 v${u.latest}。`);
+  $('#update').append(el('button', {type: 'button', textContent: '更新并重启', onclick: () => install(u.latest)}));
+}, err => say($('#update'), err.message));
+
+async function install(v) {
+  say($('#update'), `正在更新到 v${v}…`);
+  try {
+    const r = await fetch('/update', {method: 'POST'});
+    if (!r.ok) throw new Error(await r.text());
+    if ((await r.json()).updating === null) return say($('#update'), '已是最新版本。');
+  } catch (err) {
+    return say($('#update'), err.message, true);
+  }
+  say($('#update'), `已装上 v${v}，服务器正在重启，之后会重新建索引…`);
+  for (;;) {  // wait for the restarted server, then show the new version
+    await new Promise(ok => setTimeout(ok, 2000));
+    try { if ((await get('/me')).version === v) return location.reload(); } catch {}
+  }
+}
 </script>
 </body>
 </html>
-'''
+'''.replace('__VERSION__', VERSION)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -610,7 +689,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlsplit(self.path)
-        if u.path not in ('/', '/search', '/exts', '/me'):
+        if u.path not in ('/', '/search', '/exts', '/me', '/update'):
             return self.reply(404)
         auth = self.headers.get('Authorization', '')
         try:
@@ -619,9 +698,26 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(e.code, str(e), 'text/plain; charset=utf-8')
         if u.path == '/':
             return self.reply(200, PAGE, 'text/html; charset=utf-8')
+        if u.path == '/update':
+            try:
+                v = latest()[0]
+            except (OSError, ValueError, SyntaxError) as e:
+                return self.reply(502, f'查不到 GitHub 上的版本：{e}', 'text/plain; charset=utf-8')
+            return self.reply(200, json.dumps({'version': VERSION, 'latest': v, 'newer': newer(v)}))
         q = parse_qs(u.query).get('q', [''])[0]
         data = (search(q, only) if u.path == '/search' else exts(only) if u.path == '/exts'
                 else me(credentials(auth)[0], only))
+        self.reply(200, json.dumps(data))
+
+    def do_POST(self):  # POST /update: install a newer nas_search.py from main and restart into it
+        self.rfile.read(int(self.headers.get('Content-Length') or 0))  # keep-alive: the next request starts after it
+        if urlsplit(self.path).path != '/update':
+            return self.reply(404)
+        try:
+            login(self.headers.get('Authorization', ''), self.client_address[0])
+            data = {'updating': update()}
+        except Refused as e:
+            return self.reply(e.code, str(e), 'text/plain; charset=utf-8')
         self.reply(200, json.dumps(data))
 
     def reply(self, code, body='', ctype='application/json'):
@@ -659,5 +755,5 @@ if __name__ == '__main__':
     threading.Thread(target=scan_forever, daemon=True).start()
     scheme = 'https' if isinstance(server.socket, ssl.SSLSocket) else 'http'
     logins = f'NAS account logins via {DSM_URL}' if DSM_URL else 'no logins (DSM_URL unset)'
-    print(f'serving {scheme}://0.0.0.0:{PORT}  root={ROOT}  {logins}', flush=True)
+    print(f'nas-search {VERSION} serving {scheme}://0.0.0.0:{PORT}  root={ROOT}  {logins}', flush=True)
     server.serve_forever()

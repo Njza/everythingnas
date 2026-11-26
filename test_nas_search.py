@@ -361,6 +361,89 @@ class DsmLoginTest(unittest.TestCase):
             self.assertIsNone(json.loads(get('/me')[1])['shares'])
 
 
+class FakeMain(ns.BaseHTTPRequestHandler):
+    """raw.githubusercontent.com: serves body as main's nas_search.py."""
+    body = ''
+
+    def do_GET(self):
+        data = self.body.encode()
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *args):
+        pass
+
+
+class UpdateTest(unittest.TestCase):
+    """The web page's 更新并重启: installs a newer nas_search.py from main, like the exe updates itself."""
+
+    def setUp(self):
+        server, url = serve(FakeMain)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.file = Path(tempfile.mkdtemp(), 'nas_search.py')
+        self.file.write_text("VERSION = '1.0.0'\n")
+        self.restart = mock.Mock()
+        for target, name, value in [(ns, 'UPDATE_URL', url + '/nas_search.py'), (ns, 'SELF', str(self.file)),
+                                    (ns, 'VERSION', '1.0.0'), (ns, 'restart', self.restart),
+                                    (ns.threading, 'Timer', lambda delay, f: mock.Mock(start=f))]:
+            patch = mock.patch.object(target, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_versions_compare_as_numbers(self):
+        self.assertTrue(ns.newer('1.0.10'))
+        self.assertTrue(ns.newer('2'))
+        self.assertFalse(ns.newer('1.0.0'))
+        self.assertFalse(ns.newer('0.9.9'))
+
+    def test_a_newer_version_is_installed_and_restarted_into(self):
+        FakeMain.body = "VERSION = '1.1.0'\nprint('new')\n"
+        self.assertEqual(ns.update(), '1.1.0')
+        self.assertEqual(self.file.read_text(), FakeMain.body)
+        self.restart.assert_called_once()
+
+    def test_nothing_newer_changes_nothing(self):
+        FakeMain.body = "VERSION = '1.0.0'\n"
+        self.assertIsNone(ns.update())
+        self.assertEqual(self.file.read_text(), "VERSION = '1.0.0'\n")
+        self.restart.assert_not_called()
+
+    def test_a_file_that_would_not_run_is_never_installed(self):
+        for body in ["VERSION = '2.0.0'\ndef (:\n", "print('no version')\n", '<html>404</html>']:
+            FakeMain.body = body
+            with self.assertRaises(ns.Refused, msg=body) as e:
+                ns.update()
+            self.assertEqual(e.exception.code, 502)
+        self.assertEqual(self.file.read_text(), "VERSION = '1.0.0'\n")
+        self.restart.assert_not_called()
+
+    def test_a_read_only_mount_says_how_to_fix_it(self):
+        FakeMain.body = "VERSION = '1.1.0'\n"
+        with mock.patch.object(ns, 'SELF', str(Path(tempfile.mkdtemp(), 'gone', 'nas_search.py'))):
+            with self.assertRaises(ns.Refused) as e:
+                ns.update()
+        self.assertEqual(e.exception.code, 500)
+        self.assertIn('.:/app', str(e.exception))
+        self.restart.assert_not_called()
+
+    def test_only_a_login_may_update(self):
+        server, base = serve(ns.Handler)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        FakeMain.body = "VERSION = '1.1.0'\n"
+        with mock.patch.object(ns, 'DSM_URL', 'https://dsm:5001'):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(urllib.request.Request(base + '/update', data=b'', method='POST'))
+            e.exception.close()
+        self.assertEqual(e.exception.code, 401)
+        self.assertEqual(self.file.read_text(), "VERSION = '1.0.0'\n")
+        with urllib.request.urlopen(urllib.request.Request(base + '/update', data=b'', method='POST')) as r:
+            self.assertEqual(json.loads(r.read()), {'updating': '1.1.0'})  # no DSM_URL: anyone may
+
+
 class NotUtf8NameTest(unittest.TestCase):
     def test_names_that_are_not_utf8_on_disk_still_make_json_the_exe_reads(self):
         gbk = ('合同'.encode('gbk') + b'.pdf').decode('utf-8', 'surrogateescape')  # as read from a Linux disk

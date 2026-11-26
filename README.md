@@ -107,8 +107,10 @@ the folders instead and walks them again every 30 minutes.
 The search bar checks [the latest release](https://github.com/Njza/everythingnas/releases/latest) at start and every
 12 hours. A newer `NasSearch.exe` is downloaded, checked against GitHub's SHA-256 digest and put in place of the
 running one (which Windows allows to be renamed); it runs from the next start, or at once from the tray menu's
-重启以更新. Pre-releases are skipped. The NAS side is not part of releases: take `nas_search.py` from `main`,
-replace it on the NAS and restart the project. A server on HTTPS needs a search bar from v1.2.0 on: release that
+重启以更新. Pre-releases are skipped. The NAS side is not part of releases: its web page offers 更新并重启 when
+`nas_search.py` on `main` has a higher `VERSION`, replaces itself and restarts (the compose file mounts its folder
+writable for that); or take `nas_search.py` from `main`, replace it on the NAS and restart the project. Raise
+`VERSION` in `nas_search.py` with every change to it, or the page sees nothing new. A server on HTTPS needs a search bar from v1.2.0 on: release that
 first.
 
 ## Releasing

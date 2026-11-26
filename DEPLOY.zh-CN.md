@@ -29,7 +29,7 @@ NAS 上跑一个容器建文件名索引，电脑上用 `NasSearch.exe` 搜索�
 | 有存储空间 2 | 去掉 `# - /volume2:/data/volume2:ro` 前面的 `# `（没有存储空间 2 就别加） |
 | 再排除别的共享文件夹 | `SKIP_SHARES` 里用逗号隔开加上，如 `SKIP_SHARES: homes,财务`；写成 `SKIP_SHARES: ""` 则连 `homes` 也搜 |
 | 只搜部分共享文件夹 | 删掉 `/volume1` 那行，每个共享文件夹写一行 `- /volume1/文档:/data/文档:ro`，`/data/` 后面的名字必须和共享文件夹名一致 |
-| 硬盘要休眠 | 把 `SCAN_MINUTES` 调大，比如 `240`（每次扫描都会唤醒硬盘） |
+| 改索引更新频率 | `SCAN_MINUTES: 30` 改成想要的分钟数，比如 `10` 或 `240`，然后重新构建项目。网页上的"每 N 分钟更新一次"会跟着变。每次扫描都会唤醒硬盘：硬盘要休眠就调大 |
 
 > 不要把 8765 端口转发到外网：它只为局域网设计。
 
@@ -44,9 +44,64 @@ NAS 上跑一个容器建文件名索引，电脑上用 `NasSearch.exe` 搜索�
 
 ## 更新
 
-- **NAS 端程序**：从仓库下载新的 `nas_search.py` 覆盖旧的，在 Container Manager 里重新启动项目。
-- **`docker-compose.yml`**：改完要重新构建项目，只重新启动不会生效。
-- **电脑端**：自动更新。启动时和每 12 小时检查一次 Releases，有新版就下载好，下次启动生效（托盘菜单里也能立即重启）。
+### 网页一键更新 `nas_search.py`
+
+浏览器打开 `https://192.168.1.10:8765`，标题下面写着 **有新版本 v…** 时，点 **更新并重启**。服务器从 GitHub 取新的 `nas_search.py` 换上并重启，页面几秒后自动刷新，显示新版本号；索引会重新扫描。
+
+- 要求 `docker-compose.yml` 里用 `- .:/app` 挂载整个文件夹（v1.2 起的写法）。旧写法是只读挂载 `nas_search.py` 一个文件，点了会提示写不了。
+- 只更新 `nas_search.py`。新版本要是也改了 `docker-compose.yml`，还要按下面"改了 `docker-compose.yml`"的步骤重新构建。
+- 能登录搜索的人都能点，但只会装上 GitHub 上比现在新的版本。
+
+### 只换 `nas_search.py`：重新启动就行
+
+1. 下载新的 [`nas_search.py`](https://raw.githubusercontent.com/Njza/everythingnas/main/nas_search.py)（打开链接后右键另存为）。
+2. File Station → `docker/nas-search/` → **上传** → 选 **覆盖**。
+3. Container Manager → **项目** → 选中 `nas-search` → **操作** → **重新启动**。`nas_search.py` 是挂载进容器的，重启就用上新的，不用重新构建。
+4. 浏览器打开 `https://192.168.1.10:8765`，标题旁的 **NAS 端 v…** 是新版本号，就换好了。
+
+### 改了 `docker-compose.yml`：要重新构建
+
+只重新启动不会读新的 `docker-compose.yml`。
+
+1. File Station 里把新的 `docker-compose.yml` 上传到 `docker/nas-search/`，选 **覆盖**。
+2. Container Manager → **项目** → 选中 `nas-search` → **操作** → **停止**，再 **操作** → **构建**。容器按新设置重建，索引重新扫描（100 万个文件要几分钟）。
+
+也可以用 SSH（控制面板 → 终端机和 SNMP → 启用 SSH 功能，用管理员账号登录）：
+
+```bash
+cd /volume1/docker/nas-search
+sudo docker compose up -d --force-recreate
+```
+
+只换了 `nas_search.py` 时用 `sudo docker compose restart`。提示没有 `docker compose` 就写成 `docker-compose`。
+
+### 从 v1.1 升级到 v1.2
+
+先更新电脑端，再更新 NAS 端：旧版 exe 连不上新的 NAS 端。
+
+1. 等每台电脑的 exe 更新到 v1.2.0：托盘图标 → 设置，底部有版本号。还没更新的，右键托盘图标点 **重启以更新**。
+2. 按上面的步骤换 `nas_search.py`（先不用重新启动）。
+3. 换 `docker-compose.yml`：直接用新的覆盖。旧文件改过的话（比如加了 `/volume2`），也可以只在旧文件里改四处，并删掉 `AUTH` 那行：
+
+   ```yaml
+       environment:
+         DSM_URL: https://host.docker.internal:5001                # 加进 environment
+       extra_hosts:                                                # 新加一段，和 environment、volumes 对齐
+         - host.docker.internal:host-gateway
+       volumes:
+         - .:/app                                                  # 替换原来的 - ./nas_search.py:/app/nas_search.py:ro
+         - /usr/syno/etc/certificate/system/default:/cert:ro       # 加进 volumes
+   ```
+
+4. 按上面的步骤 **停止**、**构建**。
+5. 浏览器打开 `https://192.168.1.10:8765`，用一个 NAS 账号登录，看列出的共享文件夹对不对。
+6. 每台电脑：设置里填这个人的 NAS **账号**、**密码**，点 **测试连接**（这一步会记住 NAS 的证书），显示"可用"后保存。
+
+构建后容器一直停止：看容器日志，写着 `no certificate` 就是第 3 步证书那行没加对。
+
+### 电脑端
+
+自动更新。启动时和每 12 小时检查一次 Releases，有新版就下载好，下次启动生效（托盘菜单里也能立即重启）。
 
 ## 常见问题
 
