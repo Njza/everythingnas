@@ -144,6 +144,10 @@
                        VerticalAlignment="Center" TextWrapping="Wrap" />
         </DockPanel>
 
-        <TextBlock x:Name="VersionText" Style="{StaticResource Note}" Margin="0,16,0,0" />
+        <DockPanel Margin="0,16,0,0">
+            <Button x:Name="UpdateButton" DockPanel.Dock="Right" Content="检查更新"
+                    Style="{StaticResource SecondaryButton}" Click="Update_Click" />
+            <TextBlock x:Name="VersionText" Style="{StaticResource Note}" Margin="0" VerticalAlignment="Center" />
+        </DockPanel>
     </StackPanel>
 </Window>

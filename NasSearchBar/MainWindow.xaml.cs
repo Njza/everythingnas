@@ -222,7 +222,7 @@ public partial class MainWindow : Window
             settingsWindow.Activate();
             return;
         }
-        settingsWindow = new SettingsWindow(settings, TrySetHotkey);
+        settingsWindow = new SettingsWindow(settings, TrySetHotkey, Update);
         if (settingsWindow.ShowDialog() == true)
         {
             LoadSettings();
@@ -267,30 +267,35 @@ public partial class MainWindow : Window
     IndexingWindow? indexing;
 
     readonly DispatcherTimer updateCheck = new() { Interval = TimeSpan.FromHours(12) };
+    Version? downloaded;  // put in place by Update; runs from the next start
 
-    // Puts a newer GitHub release in place for the next start; offers to restart now from the tray
     async Task CheckForUpdate()
     {
-        Version? latest;
-        try
+        try { await Update(); }
+        catch (Exception e) when (Updater.Failed(e)) { }  // try again next time
+    }
+
+    // Puts a newer GitHub release in place for the next start, once per run, and offers to restart now from the tray.
+    // Returns its version, or null when this one is the latest. Throws what Updater.Failed accepts.
+    public async Task<Version?> Update()
+    {
+        // checked again after the download: the timer and 检查更新 in the settings may both have asked
+        if (downloaded is null && await Updater.UpdateAsync(CancellationToken.None) is { } latest && downloaded is null)
         {
-            latest = await Updater.UpdateAsync(CancellationToken.None);
+            downloaded = latest;
+            updateCheck.Stop();
+            var v = latest.ToString(3);
+            tray.ContextMenuStrip!.Items.Insert(0, new System.Windows.Forms.ToolStripMenuItem($"重启以更新到 {v}", null, (_, _) => RestartToUpdate()));
+            tray.ShowBalloonTip(8000, "NAS 搜索", $"新版本 {v} 已下载，下次启动时生效。右键托盘图标可以立即重启", System.Windows.Forms.ToolTipIcon.Info);
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException
-                                      or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidDataException)
-        {
-            return;  // offline, GitHub down, a bad download or a read-only folder: try again next time
-        }
-        if (latest is null) return;
-        updateCheck.Stop();  // in place; one update per run is enough
-        var v = latest.ToString(3);
-        tray.ContextMenuStrip!.Items.Insert(0, new System.Windows.Forms.ToolStripMenuItem($"重启以更新到 {v}", null, (_, _) =>
-        {
-            // the new exe waits for this one's single-instance lock (see App), then starts as usual
-            Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--updated") { UseShellExecute = false })?.Dispose();
-            Application.Current.Shutdown();
-        }));
-        tray.ShowBalloonTip(8000, "NAS 搜索", $"新版本 {v} 已下载，下次启动时生效。右键托盘图标可以立即重启", System.Windows.Forms.ToolTipIcon.Info);
+        return downloaded;
+    }
+
+    // The new exe waits for this one's single-instance lock (see App), then starts as usual
+    public static void RestartToUpdate()
+    {
+        Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--updated") { UseShellExecute = false })?.Dispose();
+        Application.Current.Shutdown();
     }
 
     public void ShowBar()

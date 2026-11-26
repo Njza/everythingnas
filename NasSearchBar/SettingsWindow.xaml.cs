@@ -11,6 +11,9 @@ namespace NasSearchBar;
 public partial class SettingsWindow : Window
 {
     readonly Func<KeyGesture, bool> trySetHotkey;
+    readonly Func<Task<Version?>> update;
+    Version? downloaded;  // once known, the update button restarts into it
+    static readonly string Current = $"版本 {Updater.Current.ToString(3)}";
     (string Address, string Pin)? tested;  // the address the last 测试连接 reached, and the certificate it saw there
 
     public Settings Result { get; private set; }
@@ -22,11 +25,13 @@ public partial class SettingsWindow : Window
         Status.SetResourceReference(TextBlock.ForegroundProperty, error ? "Negative" : "Secondary");
     }
 
-    // trySetHotkey registers the global hotkey and reports whether Windows accepted it
-    public SettingsWindow(Settings s, Func<KeyGesture, bool> trySetHotkey)
+    // trySetHotkey registers the global hotkey and reports whether Windows accepted it;
+    // update puts a newer release in place and returns its version, or null when this one is the latest
+    public SettingsWindow(Settings s, Func<KeyGesture, bool> trySetHotkey, Func<Task<Version?>> update)
     {
         InitializeComponent();
         this.trySetHotkey = trySetHotkey;
+        this.update = update;
         Result = s;
         HotkeyInput.Text = s.Hotkey;
         AddressInput.Text = s.Address;
@@ -35,7 +40,7 @@ public partial class SettingsWindow : Window
         AutoStartBox.IsChecked = AutoStart.Enabled;
         SearchNasBox.IsChecked = s.SearchNas;
         SearchLocalBox.IsChecked = s.SearchLocal;
-        VersionText.Text = $"版本 {typeof(App).Assembly.GetName().Version?.ToString(3)}";
+        VersionText.Text = Current;
         Loaded += (_, _) => AddressInput.Focus();
         SourceInitialized += (_, _) => Theme.Frame(this);
     }
@@ -115,6 +120,28 @@ public partial class SettingsWindow : Window
         {
             Say("这个键不能当快捷键");
         }
+    }
+
+    async void Update_Click(object sender, RoutedEventArgs e)
+    {
+        if (downloaded is not null)
+        {
+            MainWindow.RestartToUpdate();
+            return;
+        }
+        UpdateButton.IsEnabled = false;
+        VersionText.Text = Current + "，正在检查更新…";
+        try
+        {
+            downloaded = await update();
+            VersionText.Text = downloaded is null ? Current + "，已是最新" : $"新版本 {downloaded.ToString(3)} 已下载";
+            if (downloaded is not null) UpdateButton.Content = "重启以更新";
+        }
+        catch (Exception ex) when (Updater.Failed(ex))
+        {
+            VersionText.Text = Current + "，检查更新失败：" + ex.Message;
+        }
+        UpdateButton.IsEnabled = true;
     }
 
     async void Test_Click(object sender, RoutedEventArgs e)

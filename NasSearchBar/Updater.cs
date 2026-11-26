@@ -39,8 +39,12 @@ public static class Updater
     // 1.5 and 1.5.0.0 are both 1.5.0: Version would rank 1.5.0 below 1.5.0.0
     static Version Plain(Version v) => new(v.Major, v.Minor, Math.Max(v.Build, 0));
 
+    // What UpdateAsync throws: offline, GitHub down, an odd reply, a bad download or a read-only folder
+    public static bool Failed(Exception e) => e is HttpRequestException or TaskCanceledException or IOException
+        or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidDataException;
+
     // Downloads a newer release and puts it in place. Returns its version, or null when this one is the latest.
-    // Throws HttpRequestException, IOException, UnauthorizedAccessException, JsonException or InvalidDataException.
+    // Throws only what Failed accepts.
     public static async Task<Version?> UpdateAsync(CancellationToken ct)
     {
         using var release = JsonDocument.Parse(await Http.GetStringAsync($"https://api.github.com/repos/{Repo}/releases/latest", ct));
