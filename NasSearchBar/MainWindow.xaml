@@ -38,6 +38,24 @@
             <Setter Property="Margin" Value="0,0,16,0" />
         </Style>
 
+        <!-- accent text that underlines on hover, for the small actions in the format filter -->
+        <Style x:Key="Link" TargetType="Button">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <TextBlock x:Name="T" Text="{TemplateBinding Content}" FontSize="12" Foreground="{DynamicResource Accent}" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="T" Property="TextDecorations" Value="Underline" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="Row" TargetType="ListBoxItem">
             <Setter Property="Focusable" Value="False" />
             <Setter Property="Cursor" Value="Hand" />
@@ -222,19 +240,10 @@
                                 BorderBrush="{DynamicResource InputLine}" BorderThickness="1">
                             <StackPanel>
                                 <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="全部显示" Focusable="False" Cursor="Hand"
-                                            Click="FilterAll_Click">
-                                        <Button.Template>
-                                            <ControlTemplate TargetType="Button">
-                                                <TextBlock x:Name="T" Text="{TemplateBinding Content}" FontSize="12" Foreground="{DynamicResource Accent}" />
-                                                <ControlTemplate.Triggers>
-                                                    <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="T" Property="TextDecorations" Value="Underline" />
-                                                    </Trigger>
-                                                </ControlTemplate.Triggers>
-                                            </ControlTemplate>
-                                        </Button.Template>
-                                    </Button>
+                                    <Button DockPanel.Dock="Right" Content="全部显示" Style="{StaticResource Link}"
+                                            Click="FilterAll_Click" />
+                                    <Button DockPanel.Dock="Right" Content="全选" Style="{StaticResource Link}" Margin="0,0,12,0"
+                                            ToolTip="勾选下面列出的格式" Click="FilterTickShown_Click" />
                                     <TextBlock Text="只显示勾选的格式" FontSize="12" Foreground="{DynamicResource Secondary}" />
                                 </DockPanel>
                                 <Grid Margin="0,12,0,0">
@@ -271,19 +280,8 @@
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>
-                                <Button x:Name="RareButton" Focusable="False" Cursor="Hand" Margin="0,4,0,0"
-                                        HorizontalAlignment="Left" Click="Rare_Click">
-                                    <Button.Template>
-                                        <ControlTemplate TargetType="Button">
-                                            <TextBlock x:Name="T" Text="{TemplateBinding Content}" FontSize="12" Foreground="{DynamicResource Accent}" />
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="T" Property="TextDecorations" Value="Underline" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Button.Template>
-                                </Button>
+                                <Button x:Name="RareButton" Style="{StaticResource Link}" Margin="0,4,0,0"
+                                        HorizontalAlignment="Left" Click="Rare_Click" />
                             </StackPanel>
                         </Border>
                     </Popup>

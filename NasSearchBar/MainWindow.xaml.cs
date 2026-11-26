@@ -113,7 +113,7 @@ public partial class MainWindow : Window
     HashSet<string> Ticked() => choices.Where(c => c.On).Select(c => c.Ext).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     // Ticked first, then the common ones; the rare ones when unfolded; typing searches all of them.
-    // A fresh ItemsSource also redraws the ticks after FilterAll_Click (ExtChoice has no change events).
+    // A fresh ItemsSource also redraws the ticks after FilterAll_Click and FilterTickShown_Click (ExtChoice has no change events).
     void ShowChoices()
     {
         var q = FilterSearch.Text.Trim();
@@ -187,6 +187,13 @@ public partial class MainWindow : Window
     void FilterAll_Click(object sender, RoutedEventArgs e)
     {
         foreach (var c in choices) c.On = false;
+        ShowChoices();
+    }
+
+    // Ticks only the rows on show: the search matches while typing, else the common ones (and the rare ones when unfolded)
+    void FilterTickShown_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (ExtChoice c in FilterList.Items) c.On = true;
         ShowChoices();
     }
 
