@@ -363,15 +363,15 @@ class DsmLoginTest(unittest.TestCase):
 
 class NotUtf8NameTest(unittest.TestCase):
     def test_names_that_are_not_utf8_on_disk_still_make_json_the_exe_reads(self):
-        gbk = os.fsdecode('合同'.encode('gbk') + b'.pdf')  # how Python reads such a name from a Linux disk
+        gbk = ('合同'.encode('gbk') + b'.pdf').decode('utf-8', 'surrogateescape')  # as read from a Linux disk
         self.assertIn('\\udcba', json.dumps(gbk))  # a lone surrogate: the exe's JSON reader rejects the reply
         self.assertNotIn('\\ud', json.dumps(ns.shown(gbk)))
         self.assertEqual(ns.shown('合同.pdf'), '合同.pdf')
         root = tempfile.mkdtemp()
         try:
             open(os.fsencode(root) + b'/' + '合同'.encode('gbk') + b'.pdf', 'w').close()
-        except OSError:
-            self.skipTest('this file system takes UTF-8 names only (macOS); Linux, like the NAS, runs the rest')
+        except (OSError, ValueError):  # macOS refuses the name, Windows cannot even spell it as a path
+            self.skipTest('this system takes UTF-8 names only; Linux, like the NAS, runs the rest')
         with mock.patch.object(ns, 'ROOT', root):
             self.assertNotIn('\\ud', json.dumps(ns.build().names))
 
