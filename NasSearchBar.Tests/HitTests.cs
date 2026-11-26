@@ -10,6 +10,17 @@ public class HitTests
           {"name": "docs", "path": "\\\\DS920", "size": null, "mtime": 1793682642.7}]}
         """;
 
+    [Fact]
+    public void Nas_index_time_for_the_status_line()
+    {
+        Assert.Equal(1793682644.4, JsonSerializer.Deserialize<SearchResponse>(ServerJson, SearchResponse.Json)!.Scanned);
+        var now = new DateTime(2026, 11, 26, 16, 0, 0, DateTimeKind.Local);
+        double At(DateTime t) => new DateTimeOffset(t).ToUnixTimeSeconds();
+        Assert.Equal("NAS 索引 14:30 更新", new SearchResponse(0, 0, []) { Scanned = At(now.AddMinutes(-90)) }.IndexNote(now));
+        Assert.Equal("NAS 索引 11月25日 23:30 更新", new SearchResponse(0, 0, []) { Scanned = At(now.AddHours(-16.5)) }.IndexNote(now));
+        Assert.Equal("NAS 第一次扫描进行中", new SearchResponse(0, 0, []).IndexNote(now));  // scanned 0: no index yet
+    }
+
     [Theory]
     [InlineData(@"\\N\docs\合同\客户A", null, @"\\N\docs\合同\", "客户A")]
     [InlineData(@"\\N\docs\合同\客户A", "192.168.1.10", @"\\192.168.1.10\docs\合同\", "客户A")]

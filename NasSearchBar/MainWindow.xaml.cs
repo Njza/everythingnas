@@ -397,7 +397,8 @@ public partial class MainWindow : Window
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }  // trusted for this run only
             }
         }
-        SetStatus($"{mine.Total + (theirs?.Total ?? 0):N0} 个结果" + (nasError is null ? "" : "，" + nasError), error: nasError is not null);
+        SetStatus($"{mine.Total + (theirs?.Total ?? 0):N0} 个结果" + (nasError is null ? "" : "，" + nasError)
+                  + (theirs is null ? "" : " · " + theirs.IndexNote(DateTime.Now)), error: nasError is not null);
     }
 
     // Empty box: the pins. Otherwise the search results with pinned ones first.

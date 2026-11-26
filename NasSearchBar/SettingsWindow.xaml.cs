@@ -124,7 +124,7 @@ public partial class SettingsWindow : Window
             var nas = new NasClient(s.Server!, s.User, PassInput.Password);  // no pin: a test trusts what it sees
             var r = await nas.SearchAsync("", CancellationToken.None);
             tested = (s.Address, nas.Pin);
-            Say($"可用，{r.Indexed:N0} 个文件", error: false);
+            Say($"可用，{r.Indexed:N0} 个文件，{r.IndexNote(DateTime.Now)}", error: false);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
         {

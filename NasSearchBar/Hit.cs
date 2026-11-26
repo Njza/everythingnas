@@ -7,6 +7,16 @@ namespace NasSearchBar;
 public record SearchResponse(int Total, int Indexed, Hit[] Results)
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    public double Scanned { get; init; }  // when the NAS's index was last built, Unix seconds; 0 while its first scan runs
+
+    // For the status line: "NAS 索引 14:30 更新", with the date when it is not from today
+    public string IndexNote(DateTime now)
+    {
+        if (Scanned <= 0) return "NAS 第一次扫描进行中";
+        var t = DateTimeOffset.FromUnixTimeMilliseconds((long)(Scanned * 1000)).LocalDateTime;
+        return $"NAS 索引 {t.ToString(t.Date == now.Date ? "HH:mm" : "M月d日 HH:mm")} 更新";
+    }
 }
 
 // nas_search.py's /exts: every file extension in the index, most files first
