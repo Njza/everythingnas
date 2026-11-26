@@ -378,11 +378,15 @@ class DsmLoginTest(unittest.TestCase):
                     return e.code, e.read().decode()
         q = '/search?q=' + urllib.parse.quote('合同')
         self.assertEqual(get(q)[0], 401)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(base + q)
+        with e.exception:  # no browser login box: it could not log out, and stays stuck on a refused account
+            self.assertIsNone(e.exception.headers['WWW-Authenticate'])
         self.assertEqual(get(q, '婉:wrong'), (401, 'NAS 账号或密码不对'))
         self.assertEqual(get(q, '2fa:x'), (403, '这个 NAS 账号开了两步验证，不能用来搜索'))
         code, body = get(q, '梅:a:b')
         self.assertEqual([r['path'] for r in json.loads(body)['results']], ['\\\\DS\\梅'])
-        self.assertIn('<title>NAS 搜索</title>', get('/', '梅:a:b')[1])
+        self.assertIn('<title>NAS 搜索</title>', get('/')[1])  # the page logs in with its own form
         self.assertEqual(json.loads(get('/me', '梅:a:b')[1])['shares'], ['梅'])
         self.assertEqual(get('/nope', '梅:a:b')[0], 404)
         with mock.patch.object(ns, 'DSM_URL', ''):  # no DSM: no login, everything

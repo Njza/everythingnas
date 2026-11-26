@@ -22,7 +22,7 @@ from itertools import accumulate, compress, count, filterfalse, repeat
 from operator import add, and_, contains, not_, or_
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-VERSION = '1.1.0'  # raise it when this file changes: the web page shows it, so you can see which one the NAS runs
+VERSION = '1.2.0'  # raise it when this file changes: the web page shows it, so you can see which one the NAS runs
 ROOT = os.environ.get('ROOT', '/data').rstrip('/')
 NAS = os.environ.get('NAS_NAME', 'NAS')
 SCAN_MINUTES = float(os.environ.get('SCAN_MINUTES', '30'))  # full rescan: also catches edited files' sizes and dates
@@ -607,57 +607,135 @@ PAGE = r'''<!doctype html>
 <style>
 :root {
   color-scheme: light dark;
-  --bg: #f3f4f6; --panel: #fff; --text: #1b2130; --muted: #5c6577; --line: #dcdfe5; --bad: #b3261e;
-  font: 15px/1.55 system-ui, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  /* cool paper and ink; teal for what you can act on, amber only for folders */
+  --paper: #f3f5f2; --surface: #fff; --ink: #18201c; --muted: #5b6660; --line: #d9dfda;
+  --accent: #0e6b5b; --on-accent: #fff; --folder: #c4870f; --bad: #b3261e; --hover: #ebf0ec; --chip: #e2eae5;
+  font: 15px/1.6 "Segoe UI Variable Text", "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  accent-color: var(--accent);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #13161b; --panel: #1b1f26; --text: #e5e8ee; --muted: #98a1b0; --line: #2d333d; --bad: #ff8b80; }
+  :root {
+    --paper: #131715; --surface: #1a1f1c; --ink: #e2e8e4; --muted: #96a19b; --line: #2b3330;
+    --accent: #5cc2aa; --on-accent: #0b1f1a; --folder: #e2b04a; --bad: #ff8b80; --hover: #212824; --chip: #25312c;
+  }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); }
-main { max-width: 980px; margin: 0 auto; padding: 28px 16px 64px; }
-h1 { font-size: 21px; margin: 0; }
-h1 small { font-size: 13px; font-weight: normal; color: var(--muted); }
-button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 12px; margin-left: 8px; cursor: pointer; }
-section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-top: 16px; }
-.note { margin: 6px 0 0; color: var(--muted); }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--paper); color: var(--ink); }
+main { max-width: 1080px; margin: 0 auto; padding: 28px 24px 56px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { margin: 0; color: var(--muted); font-size: 14px; }
 .note.error { color: var(--bad); }
-input { font: inherit; color: inherit; width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; margin-top: 12px; }
-.table-wrapper { overflow: auto; max-block-size: min(560px, 70vh); border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; }
+button { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 14px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+input { font: inherit; color: inherit; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; }
+input:focus-visible { outline-offset: 0; border-color: var(--accent); }
+
+.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+h1 { font-size: 22px; font-weight: 650; margin: 0; }
+h1 small { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 6px; }
+#update button { margin-left: 10px; }
+
+.login { max-width: 380px; margin-top: 40px; }
+.login h2 { font-size: 19px; font-weight: 650; margin: 0 0 4px; }
+.login label { display: block; margin: 18px 0 6px; font-size: 14px; font-weight: 600; }
+.login button { width: 100%; margin-top: 24px; padding: 10px; font-size: 15px; }
+#refused { margin-top: 12px; min-height: 1.6em; }
+
+.who { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 20px 0 14px; }
+#who { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#who strong { font-size: 17px; font-weight: 650; margin-right: 4px; }
+#logout { flex: none; }
+.share { background: var(--chip); border-radius: 6px; padding: 0 8px; font-size: 14px; }
+.count { color: var(--muted); font-size: 14px; margin-left: 6px; }
+/* the search box is the page: large, and drawn in ink rather than a hairline */
+#q { font-size: 19px; padding: 13px 16px; border: 2px solid var(--ink); border-radius: 10px; }
+#q:focus-visible { border-color: var(--accent); outline: 3px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.status { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 24px; margin: 12px 2px 8px; }
+
+.table-wrapper { overflow: auto; max-block-size: min(620px, 68vh); border: 1px solid var(--line); border-radius: 10px; background: var(--surface); container-type: inline-size; }
 table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-thead th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
-tbody th { font-weight: normal; }
-.path { color: var(--muted); max-width: 26em; overflow: hidden; text-overflow: ellipsis; }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+tbody tr:last-child > * { border-bottom: 0; }
+thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); color: var(--muted); font-size: 13px; font-weight: 600; }
+tbody th { font-weight: 500; }
+tbody tr:hover { background: var(--hover); }
+/* a page outline before a file, an amber folder before a folder */
+tbody th::before { content: ""; display: inline-block; width: 10px; height: 13px; margin-right: 10px; vertical-align: -2px; border: 1.5px solid var(--muted); border-radius: 2px; }
+tbody .dir th::before { width: 14px; height: 11px; vertical-align: -1px; border: 0; border-radius: 1px; background: var(--folder); clip-path: polygon(0 0, 42% 0, 52% 20%, 100% 20%, 100% 100%, 0 100%); }
+.path { color: var(--muted); max-width: 30em; overflow: hidden; text-overflow: ellipsis; }
+.num, .date { font-variant-numeric: tabular-nums; }
+.num { text-align: right; }
+.date, .dir .num { color: var(--muted); }
+
+/* narrow (phone, or a narrow window): one entry per block, name on top */
+@container (width < 600px) {
+  table, thead, tbody, tr, th, td { display: block; }
+  thead { display: none; }
+  tbody tr { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  tbody tr:last-child { border-bottom: 0; }
+  tbody tr > * { padding: 0; border: 0; }
+  tbody th { white-space: normal; overflow-wrap: anywhere; }
+  .path { max-width: none; margin-top: 2px; }
+  td.num, td.date { display: inline-block; font-size: 13px; }
+  td.num { min-width: 5.5em; text-align: left; color: var(--muted); }
+  td.date::before { content: "修改于 "; }
+}
+@media (max-width: 480px) {
+  main { padding: 20px 16px 40px; }
+  #q { font-size: 17px; }
+}
 </style>
 </head>
 <body>
 <main>
-  <h1>NAS 搜索 <small>NAS 端 v__VERSION__</small></h1>
-  <p id="update" class="note"></p>
-  <p id="who" class="note">读取中…</p>
-  <p id="scan" class="note"></p>
-  <section aria-labelledby="results-h">
-    <p id="results-h" class="note">和电脑上的搜索框搜到的一样。换账号：关掉浏览器重开，或用无痕窗口。</p>
-    <input id="q" type="search" placeholder="和搜索框的写法一样，空着列出全部" aria-label="搜索" autofocus>
-    <p id="summary" class="note"></p>
-    <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="results-h">
+  <header class="top">
+    <h1>NAS 搜索 <small>NAS 端 v__VERSION__</small></h1>
+    <p id="update" class="note"></p>
+  </header>
+  <section id="login" class="login" aria-labelledby="login-h" hidden>
+    <h2 id="login-h">用 NAS 账号登录</h2>
+    <p class="note">就是打开 \\NAS 时用的账号。只搜得到这个账号有权限的共享文件夹。</p>
+    <form>
+      <label for="user">NAS 账号</label>
+      <input id="user" name="username" autocomplete="username" spellcheck="false" autocapitalize="none" autocorrect="off" required>
+      <label for="pass">密码</label>
+      <input id="pass" name="password" type="password" autocomplete="current-password" required>
+      <button class="primary">登录</button>
+      <p id="refused" class="note" role="alert"></p>
+    </form>
+  </section>
+  <div id="app" hidden>
+    <div class="who">
+      <p id="who"></p>
+      <button id="logout" type="button" hidden>退出</button>
+    </div>
+    <input id="q" type="search" enterkeyhint="search" aria-label="搜索文件名"
+           placeholder="搜索文件名，写法同电脑上的搜索框">
+    <div class="status">
+      <p id="summary" class="note" aria-live="polite"></p>
+      <p id="scan" class="note"></p>
+    </div>
+    <div class="table-wrapper" tabindex="0" role="region" aria-label="搜索结果">
       <table>
         <thead><tr><th scope="col">名称</th><th scope="col">位置</th><th scope="col" class="num">大小</th><th scope="col">修改日期</th></tr></thead>
         <tbody id="hits"></tbody>
       </table>
     </div>
-  </section>
+  </div>
 </main>
 <script>
 const $ = s => document.querySelector(s);
 const num = n => n.toLocaleString('zh-CN');
 const el = (tag, props, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 
-async function get(path) {
-  const r = await fetch(path);
-  if (!r.ok) throw new Error(await r.text() || `出错了（HTTP ${r.status}）`);
+// The account logged in on this page, as an Authorization header. Only in memory: 退出, or closing the tab, forgets it.
+let auth = '';
+
+async function get(path, init = {}) {
+  const r = await fetch(path, {...init, headers: auth ? {Authorization: auth} : {}});
+  if (!r.ok) throw Object.assign(new Error(await r.text() || `出错了（HTTP ${r.status}）`), {status: r.status});
   return r.json();
 }
 
@@ -675,11 +753,11 @@ function find() {
       const r = await get('/search?' + new URLSearchParams({q: $('#q').value}));
       if (my !== seq) return;
       say($('#summary'), `${num(r.total)} 个结果` + (r.total > r.results.length ? `，列出前 ${r.results.length} 个` : ''));
-      $('#hits').replaceChildren(...r.results.map(h => el('tr', {},
+      $('#hits').replaceChildren(...r.results.map(h => el('tr', {className: h.size == null ? 'dir' : ''},
         el('th', {scope: 'row', textContent: h.name}),
         el('td', {className: 'path', textContent: h.path, title: h.path}),
         el('td', {className: 'num', textContent: size(h.size)}),
-        el('td', {textContent: new Date(h.mtime * 1000).toLocaleString('zh-CN')}))));
+        el('td', {className: 'date', textContent: time(h.mtime)}))));
     } catch (err) {
       if (my === seq) say($('#summary'), err.message, true);
     }
@@ -696,28 +774,69 @@ function size(b) {
 
 $('#q').addEventListener('input', find);
 const time = s => new Date(s * 1000).toLocaleString('zh-CN');
-get('/me').then(m => {
-  say($('#who'), m.shares === null
-    ? `不用登录：谁都能搜到全部 ${num(m.total)} 项。`
-    : `以 NAS 账号 ${m.name} 登录，能搜 ${m.shares.join('、') || '（没有共享文件夹）'}，共 ${num(m.indexed)} 项（全部 ${num(m.total)} 项）。`);
-  say($('#scan'), m.scanned
-    ? `索引更新于 ${time(m.scanned)}。每 ${m.check} 分钟查一次新建、删除和改名的文件，每 ${m.every} 分钟全部重扫一次（更新改过的文件的大小和日期）。`
-    : '第一次扫描进行中，稍后刷新。');
-  find();
-}, err => say($('#who'), err.message, true));
 
-get('/update').then(u => {
-  if (!u.newer) return say($('#update'), `已是最新版本（GitHub 上是 v${u.latest}）。`);
-  say($('#update'), `有新版本 v${u.latest}。`);
-  $('#update').append(el('button', {type: 'button', textContent: '更新并重启', onclick: () => install(u.latest)}));
-}, err => say($('#update'), err.message));
+async function start() {
+  let m;
+  try {
+    m = await get('/me');
+  } catch (err) {
+    const tried = auth;
+    auth = '';  // refused (wrong password, two-step verification...): back to the form, to try another account
+    return showLogin(tried || err.status !== 401 ? err.message : '');
+  }
+  $('#login').hidden = true;
+  $('#app').hidden = false;
+  $('#logout').hidden = m.shares === null;
+  $('#who').replaceChildren(...(m.shares === null
+    ? [`不用登录：谁都能搜到全部 ${num(m.total)} 项。`]
+    : [el('strong', {textContent: m.name}), '能搜',
+       ...(m.shares.length ? m.shares.map(s => el('span', {className: 'share', textContent: s})) : ['（没有共享文件夹）']),
+       el('span', {className: 'count', textContent: `共 ${num(m.indexed)} 项，NAS 上一共 ${num(m.total)} 项`})]));
+  say($('#scan'), m.scanned
+    ? `索引 ${time(m.scanned)} 更新。每 ${m.check} 分钟查新建、删除和改名的文件，每 ${m.every} 分钟全部重扫。`
+    : '第一次扫描进行中，稍后刷新。');
+  $('#q').focus();
+  find();
+  get('/update').then(u => {
+    if (!u.newer) return say($('#update'), '已是最新版本');
+    say($('#update'), `有新版本 v${u.latest}`);
+    $('#update').append(el('button', {type: 'button', className: 'primary', textContent: '更新并重启', onclick: () => install(u.latest)}));
+  }, err => say($('#update'), err.message));
+}
+
+function showLogin(why) {
+  $('#app').hidden = true;
+  $('#login').hidden = false;
+  say($('#refused'), why, true);
+  $('#pass').value = '';
+  $('#user').select();
+}
+
+$('#login form').addEventListener('submit', e => {
+  e.preventDefault();
+  const utf8 = new TextEncoder().encode($('#user').value + ':' + $('#pass').value);  // like NasSearch.exe
+  auth = 'Basic ' + btoa(String.fromCharCode(...utf8));
+  say($('#refused'), '登录中…');
+  start();
+});
+
+$('#logout').addEventListener('click', () => {
+  auth = '';
+  clearTimeout(timer);
+  seq++;  // a search still on its way must not fill the table for the next person
+  $('#q').value = '';
+  $('#hits').replaceChildren();
+  say($('#summary'), '');
+  say($('#update'), '');
+  showLogin('');
+});
+
+start();
 
 async function install(v) {
   say($('#update'), `正在更新到 v${v}…`);
   try {
-    const r = await fetch('/update', {method: 'POST'});
-    if (!r.ok) throw new Error(await r.text());
-    if ((await r.json()).updating === null) return say($('#update'), '已是最新版本。');
+    if ((await get('/update', {method: 'POST'})).updating === null) return say($('#update'), '已是最新版本。');
   } catch (err) {
     return say($('#update'), err.message, true);
   }
@@ -740,13 +859,13 @@ class Handler(BaseHTTPRequestHandler):
         u = urlsplit(self.path)
         if u.path not in ('/', '/search', '/exts', '/me', '/update'):
             return self.reply(404)
+        if u.path == '/':  # the page holds no names: it logs in with its own form
+            return self.reply(200, PAGE, 'text/html; charset=utf-8')
         auth = self.headers.get('Authorization', '')
         try:
             only = login(auth, self.client_address[0])
         except Refused as e:
             return self.reply(e.code, str(e), 'text/plain; charset=utf-8')
-        if u.path == '/':
-            return self.reply(200, PAGE, 'text/html; charset=utf-8')
         if u.path == '/update':
             try:
                 v = latest()[0]
@@ -771,9 +890,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def reply(self, code, body='', ctype='application/json'):
         body = body.encode()
+        # No WWW-Authenticate on a 401: the browser's own login box keeps an account until the browser closes, with
+        # no way to log out, and stays stuck on one DSM refuses (403). The page and NasSearch.exe send the account.
         self.send_response(code)
-        if code == 401:  # charset: browsers then send a Chinese name or password as UTF-8, like NasSearch.exe
-            self.send_header('WWW-Authenticate', 'Basic realm="NAS", charset="UTF-8"')
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(body)))  # HTTP/1.1: without it the client waits for a body
         self.end_headers()
