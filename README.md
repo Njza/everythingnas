@@ -8,8 +8,9 @@ come in one list and open straight in their default app.
 
 - **This PC**: NTFS drives are read like Everything does, from the master file table (C: with 1.1M entries in
   ~20 s), then kept current from the change journal, so new, renamed and deleted files show up within a second.
-- **NAS**: one Python file, standard library only, in Docker. It rescans the shares on a timer and keeps names,
-  sizes and dates in memory, so a search never touches the disks.
+- **NAS**: one Python file, standard library only, in Docker. It keeps names, sizes and dates in memory, so a search
+  never touches the disks. Every minute it lists again the folders whose date modified changed, so new, renamed
+  and deleted files show up within about a minute; every 30 minutes it rescans everything.
 - **Fast**: a search over a million names takes 10–50 ms on the PC; the PC's results show first and the NAS's
   join them.
 - **Updates itself** from this repo's GitHub releases.
@@ -148,7 +149,9 @@ docker run --rm -v "$PWD":/w -v nas-search-nuget:/root/.nuget/packages -w /w/Nas
   lists the shares to leave out), Synology's own folders (`@eaDir`, `@appstore`, every `@` folder), `#recycle`,
   `#snapshot`.
 - RAM: about 320 MB per million entries on the NAS (double during a rescan), about 380 MB for C: with 1.1M on the PC.
-- A NAS file deleted since the last scan stays listed until the next one (`SCAN_MINUTES`, 30 by default); each scan
-  wakes the disks.
+- On the NAS, a file added, renamed or deleted shows at the next check (`CHECK_MINUTES`, 1 by default: one stat
+  per folder). An edited file's new size and date, and changes a copy tool hides by setting a folder's date back,
+  wait for the next full scan (`SCAN_MINUTES`, 30 by default). Checks may keep the disks awake: setting
+  `CHECK_MINUTES` to the same value as `SCAN_MINUTES` turns them off.
 - Meant for the LAN: do not port-forward it to the internet. Everyone who can reach port 8765 can search the file
   names if `DSM_URL` is `""`.

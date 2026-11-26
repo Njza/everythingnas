@@ -4,7 +4,8 @@ services:
     command: python -u /app/nas_search.py
     environment:
       NAS_NAME: NAS          # optional: only shown; the search bar opens files by the address in its settings
-      SCAN_MINUTES: 30       # full rescan interval; each scan wakes the disks
+      CHECK_MINUTES: 1       # new, renamed and deleted files: lists again only folders whose date modified changed
+      SCAN_MINUTES: 30       # full rescan, also for edited files' sizes and dates; each one wakes the disks
       SKIP_SHARES: homes     # shared folders not to search, comma-separated; homes = every user's own folder
       # This NAS's DSM, as the container reaches it: each person then logs in with their own NAS account and finds
       # only the shared folders DSM lets that account open. "" turns logins off: everyone finds every file.

@@ -199,6 +199,36 @@ class WholeVolumeTest(unittest.TestCase):
             self.assertEqual([x['path'] for x in ns.search('diary')['results']], ['\\\\DS\\homes\\mei'])
 
 
+class QuickCheckTest(unittest.TestCase):
+    """Between full scans, a check lists again only the folders whose date modified changed."""
+
+    def test_a_check_finds_what_a_full_scan_finds_listing_only_changed_folders(self):
+        root = tempfile.mkdtemp()
+        for p in ['volume1/docs/a/old.txt', 'volume1/docs/b/c/deep.txt', 'volume1/video/x.mkv']:
+            Path(root, p).parent.mkdir(parents=True, exist_ok=True)
+            Path(root, p).write_text('x')
+
+        def settle():  # dates from long ago: a folder changed in the last 2 s is listed again at every check
+            for d, _, _ in os.walk(root):
+                os.utime(d, (1e9, 1e9))
+
+        def entries(ix):  # sizes, not dates: a folder's own date is only refreshed by a full scan
+            return sorted(zip(ix.names, map(ix.dirs.__getitem__, ix.parent), ix.size))
+
+        with mock.patch.object(ns, 'ROOT', root):
+            settle()
+            ix = ns.build()
+            self.assertEqual(ns.build(ix).listed, 0)  # nothing changed: only one stat per folder
+            Path(root, 'volume1/docs/a/new.txt').write_text('x')
+            os.rename(Path(root, 'volume1/docs/b/c'), Path(root, 'volume1/docs/b/d'))  # its content moves along
+            os.remove(Path(root, 'volume1/video/x.mkv'))
+            ix = ns.build(ix)
+            self.assertEqual(entries(ix), entries(ns.build()))
+            self.assertEqual(ix.listed, 4)  # a, b, b/d (new), video; docs and the root are copied
+            self.assertIn(('deep.txt', '/docs/b/d', 1), entries(ix))
+            self.assertNotIn('x.mkv', ix.names)
+
+
 class FakeDsm(ns.BaseHTTPRequestHandler):
     """DSM's /webapi/entry.cgi: login, list_share, logout, for a few accounts."""
     accounts = {'婉': 'pw', '梅': 'a:b', '2fa': 'x', 'nofs': 'x'}

@@ -1,6 +1,7 @@
 """Everything-style instant file name search for a Synology NAS.
 
-Scans ROOT every SCAN_MINUTES, keeps all names in memory and answers /search and /exts for NasSearch.exe.
+Checks ROOT's folders for changes every CHECK_MINUTES, rescans it all every SCAN_MINUTES, keeps all names in memory
+and answers /search and /exts for NasSearch.exe.
 Standard library only, so it runs in the stock python Docker image.
 """
 import base64
@@ -21,10 +22,11 @@ from itertools import accumulate, compress, count, filterfalse, repeat
 from operator import add, and_, contains, not_, or_
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-VERSION = '1.0.0'  # raise it when this file changes: the web page shows it, so you can see which one the NAS runs
+VERSION = '1.1.0'  # raise it when this file changes: the web page shows it, so you can see which one the NAS runs
 ROOT = os.environ.get('ROOT', '/data').rstrip('/')
 NAS = os.environ.get('NAS_NAME', 'NAS')
-SCAN_MINUTES = float(os.environ.get('SCAN_MINUTES', '30'))
+SCAN_MINUTES = float(os.environ.get('SCAN_MINUTES', '30'))  # full rescan: also catches edited files' sizes and dates
+CHECK_MINUTES = float(os.environ.get('CHECK_MINUTES', '1'))  # lists again only folders whose date modified changed
 PORT = int(os.environ.get('PORT', '8765'))
 # DSM on this NAS, as the container reaches it. Set: every search needs a NAS account (each person's own, as for
 # \\NAS) and finds only the shared folders DSM lets that account open. Unset: no login, everyone finds everything.
@@ -43,10 +45,12 @@ LIMIT = 200
 # big is every lowercase name between \0 separators, starts[i] the offset of the \0 before entry i.
 # size (-1 for folders) and mtime come from the scan, so a search reads no disk.
 # cache holds what is worked out once per scan (per-user visibility, format counts) and goes with the index.
-Index = namedtuple('Index', 'names lows parent isdir dirs big starts scanned size mtime cache')
+# Per folder, for the next check: rels is its path on disk under ROOT, dirtime its date modified in ns when it was
+# listed (-1: list it again). listed counts the folders this scan read from disk.
+Index = namedtuple('Index', 'names lows parent isdir dirs big starts scanned size mtime cache rels dirtime listed')
 
 
-def pack(names, parent, isdir, dirs, scanned, size=None, mtime=None):
+def pack(names, parent, isdir, dirs, scanned, size=None, mtime=None, rels=None, dirtime=None, listed=0):
     size = size or array('q', bytes(8 * len(names)))
     mtime = mtime or array('d', bytes(8 * len(names)))
     lows = [n.lower() for n in names]
@@ -58,7 +62,7 @@ def pack(names, parent, isdir, dirs, scanned, size=None, mtime=None):
     starts = array('q', accumulate(map(add, map(len, lows), repeat(1)), initial=0))
     return Index(names, lows, [parent[i] for i in order], bytearray(map(isdir.__getitem__, order)),
                  dirs, big, starts, scanned, array('q', map(size.__getitem__, order)),
-                 array('d', map(mtime.__getitem__, order)), {})
+                 array('d', map(mtime.__getitem__, order)), {}, rels, dirtime, listed)
 
 
 INDEX = pack([], [], bytearray(), [''], 0)
@@ -90,16 +94,56 @@ def shown(name):
     return name.encode('utf-8', 'surrogateescape').decode('utf-8', 'replace')
 
 
-def build():
-    # shortcut: full rescan, ~320 MB RAM per million entries (about double during a rescan); a file deleted since
-    # the last scan stays listed until the next one. Upgrade to inotify + SQLite past a few million files.
-    names, parent, isdir, dirs = [], [], bytearray(), []
+def stamp(rel):
+    """A folder's date modified in ns: it changes when an entry in it is added, deleted or renamed. -1: unreadable."""
+    try:
+        return os.stat(ROOT + rel).st_mtime_ns
+    except OSError:
+        return -1
+
+
+def build(old=None):
+    """Every folder under ROOT, listed -> Index. With old, a quick check: a folder whose date modified is the same as
+    when old listed it is not listed again, its entries are copied from old (as Everything's fast rescan)."""
+    # shortcut: ~320 MB RAM per million entries (about double while the index changes). A check sees names added,
+    # deleted or renamed, but an edited file's size and date, and a folder date set back by a copy tool (robocopy
+    # /DCOPY:T, rsync -t), wait for the next full scan. Upgrade to inotify + SQLite past a few million files.
+    same, kids, subs = {}, [], []
+    if old:
+        now = array('q', map(stamp, old.rels))  # one stat per folder, no listing
+        if now == old.dirtime:
+            return old._replace(scanned=time.time(), listed=0)
+        at = {r: k for k, r in enumerate(old.rels)}
+        same = {r: k for r, k in at.items() if now[k] == old.dirtime[k]}
+        kids, subs = [[] for _ in old.rels], [[] for _ in old.rels]  # per folder: its entries, its folders' rels
+        for i, p in enumerate(old.parent):
+            kids[p].append(i)
+        for r in old.rels[1:]:  # [0] is ROOT itself
+            subs[at[r.rpartition('/')[0]]].append(r)
+    names, parent, isdir, dirs, rels, dirtime = [], [], bytearray(), [], [], array('q')
     size, mtime = array('q'), array('d')
+    listed = 0
     todo = ['']  # folders still to list, relative to ROOT
     while todo:
         rel = todo.pop()
         here = len(dirs)
         dirs.append(shown(unc_dir(rel)))  # only for showing and path terms: searches read no disk
+        rels.append(rel)
+        k = same.get(rel)
+        if k is not None:
+            dirtime.append(old.dirtime[k])
+            for i in kids[k]:
+                names.append(old.names[i])
+                parent.append(here)
+                isdir.append(old.isdir[i])
+                size.append(old.size[i])
+                mtime.append(old.mtime[i])
+            todo += subs[k]
+            continue
+        listed += 1
+        t = stamp(rel)  # before listing: a change made while listing then shows at the next check
+        # changed within the last 2 s: a change later in the same clock tick would keep this date, so list it again
+        dirtime.append(-1 if time.time_ns() - t < 2_000_000_000 else t)
         try:
             entries = os.scandir(ROOT + rel)
         except OSError:  # gone or unreadable since its folder was listed
@@ -123,7 +167,7 @@ def build():
                 mtime.append(st.st_mtime)
                 if folder:
                     todo.append(rel + '/' + e.name)
-    return pack(names, parent, isdir, dirs, time.time(), size, mtime)
+    return pack(names, parent, isdir, dirs, time.time(), size, mtime, rels, dirtime, listed)
 
 
 # Everything syntax: space = AND, | = OR (binds tighter than AND), ! = NOT, < > = group, "..." = plain text
@@ -484,7 +528,7 @@ def me(name, only):
     ix = INDEX
     shares = None if only is None else sorted((t for t in set(tops(ix)) if t and t.lower() in only), key=str.lower)
     return {'name': name, 'shares': shares, 'indexed': found(ix, only), 'total': len(ix.names),
-            'scanned': ix.scanned, 'every': SCAN_MINUTES, 'version': VERSION}
+            'scanned': ix.scanned, 'every': SCAN_MINUTES, 'check': CHECK_MINUTES, 'version': VERSION}
 
 
 # Updates from the web page, like NasSearch.exe's own: main's nas_search.py, replacing this file and restarting.
@@ -537,13 +581,18 @@ def restart():
 
 def scan_forever():
     global INDEX
+    full = float('-inf')  # when the last full scan started, time.monotonic()
     while True:
-        t = time.time()
-        INDEX = build()
+        t = time.monotonic()
+        quick = t - full < SCAN_MINUTES * 60
+        full = full if quick else t
+        INDEX = build(INDEX if quick else None)
         for only in {got for _, got in list(_checked.values()) if isinstance(got, frozenset)} or {None}:
             exts(only)  # count the formats now, so the first format list after a scan does not wait for it
-        print(f'indexed {len(INDEX[0])} entries in {time.time() - t:.1f}s', flush=True)
-        time.sleep(SCAN_MINUTES * 60)
+        if not quick or INDEX.listed:
+            print(f'{"checked" if quick else "indexed"} {len(INDEX.names)} entries, listed {INDEX.listed} of '
+                  f'{len(INDEX.dirs)} folders in {time.monotonic() - t:.1f}s', flush=True)
+        time.sleep(CHECK_MINUTES * 60)
 
 
 # The web page at /: search as the logged-in NAS account sees it, to check logins and permissions from a browser.
@@ -651,8 +700,8 @@ get('/me').then(m => {
   say($('#who'), m.shares === null
     ? `不用登录：谁都能搜到全部 ${num(m.total)} 项。`
     : `以 NAS 账号 ${m.name} 登录，能搜 ${m.shares.join('、') || '（没有共享文件夹）'}，共 ${num(m.indexed)} 项（全部 ${num(m.total)} 项）。`);
-  say($('#scan'), m.scanned  // a scan starts this many minutes after the last one ended
-    ? `索引更新于 ${time(m.scanned)}，每 ${m.every} 分钟更新一次，下次约 ${time(m.scanned + m.every * 60)} 开始。`
+  say($('#scan'), m.scanned
+    ? `索引更新于 ${time(m.scanned)}。每 ${m.check} 分钟查一次新建、删除和改名的文件，每 ${m.every} 分钟全部重扫一次（更新改过的文件的大小和日期）。`
     : '第一次扫描进行中，稍后刷新。');
   find();
 }, err => say($('#who'), err.message, true));
